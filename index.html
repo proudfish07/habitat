@@ -7,24 +7,25 @@
   <meta name="theme-color" content="#111111" />
   <title>Habit Hourglass</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React 與 Babel：瀏覽器直接編譯 JSX，免打包 -->
+  <!-- React 與 Babel：瀏覽器即時編譯 JSX -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    body { background-color: #f9fafb; color: #111; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans", sans-serif; }
+    /* 最小化配色：黑 / 白 / 中性灰 */
+  </style>
 </head>
-<body class="bg-neutral-50">
+<body>
   <div id="root"></div>
 
-  <!-- 註冊 service worker -->
   <script>
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js');
-      });
+      window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js'));
     }
   </script>
 
-  <!-- App 程式碼（單檔版） -->
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
@@ -42,83 +43,63 @@
     };
     const saveState = (state) => localStorage.setItem(LS_KEY, JSON.stringify(state));
 
-    // ===== 平滑補間 =====
+    // ===== Tween =====
     function useTween(value, duration = 700) {
       const [v, setV] = useState(value);
       useEffect(() => {
-        let raf;
-        const start = performance.now();
-        const from = v, to = value;
+        let raf; const start = performance.now(); const from = v, to = value;
         const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-        const tick = (now) => {
-          const t = Math.min(1, (now - start) / duration);
-          setV(from + (to - from) * easeOutCubic(t));
-          if (t < 1) raf = requestAnimationFrame(tick);
-        };
-        raf = requestAnimationFrame(tick);
-        return () => cancelAnimationFrame(raf);
+        const tick = (now) => { const t = Math.min(1, (now - start) / duration); setV(from + (to - from) * easeOutCubic(t)); if (t < 1) raf = requestAnimationFrame(tick); };
+        raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf);
       }, [value, duration]);
       return v;
     }
 
-    // ===== 沙漏 SVG =====
+    // ===== Hourglass (粒子圓點，單色) =====
     function Hourglass({ progress = 0, small = false }) {
       const clamped = Math.max(0, Math.min(1, progress || 0));
       const anim = useTween(clamped, 700);
-      const w = small ? 64 : 120;
-      const h = small ? 96 : 180;
-      const strokeW = small ? 2 : 3;
-
-      const lowH = anim * (h * 0.38);
-      const upH  = (1 - anim) * (h * 0.38);
+      const w = small ? 64 : 120; const h = small ? 96 : 180; const strokeW = small ? 2 : 3;
+      const total = 10; // 顆數
+      const filled = Math.round(anim * total);
 
       return (
         <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="drop-shadow-sm">
-          <path
-            d={`M ${w*0.15} ${h*0.05} L ${w*0.85} ${h*0.05}
-                C ${w*0.8} ${h*0.25}, ${w*0.7} ${h*0.4}, ${w*0.5} ${h*0.5}
-                C ${w*0.7} ${h*0.6}, ${w*0.8} ${h*0.75}, ${w*0.85} ${h*0.95}
-                L ${w*0.15} ${h*0.95}
-                C ${w*0.2} ${h*0.75}, ${w*0.3} ${h*0.6}, ${w*0.5} ${h*0.5}
-                C ${w*0.3} ${h*0.4}, ${w*0.2} ${h*0.25}, ${w*0.15} ${h*0.05} Z`}
-            fill="none" stroke="currentColor" strokeWidth={strokeW}
-          />
-          <clipPath id="upperClip">
-            <path d={`M ${w*0.18} ${h*0.06} L ${w*0.82} ${h*0.06} L ${w*0.5} ${h*0.5} Z`} />
-          </clipPath>
-          <rect x={w*0.18} y={h*0.06 + (h*0.38 - upH)} width={w*0.64} height={upH}
-                clipPath="url(#upperClip)" fill="currentColor" opacity="0.2" />
+          {/* 外框 */}
+          <path d={`M ${w*0.15} ${h*0.06} L ${w*0.85} ${h*0.06} C ${w*0.8} ${h*0.25}, ${w*0.7} ${h*0.4}, ${w*0.5} ${h*0.5} C ${w*0.7} ${h*0.6}, ${w*0.8} ${h*0.75}, ${w*0.85} ${h*0.94} L ${w*0.15} ${h*0.94} C ${w*0.2} ${h*0.75}, ${w*0.3} ${h*0.6}, ${w*0.5} ${h*0.5} C ${w*0.3} ${h*0.4}, ${w*0.2} ${h*0.25}, ${w*0.15} ${h*0.06} Z`} fill="none" stroke="currentColor" strokeWidth={strokeW} />
+
+          {/* 上部粒子（未落下） */}
+          {Array.from({ length: total - filled }).map((_, i) => (
+            <circle key={`u${i}`} cx={w*0.5} cy={h*0.14 + i*(h*0.024)} r={small?1.4:2.4} fill="currentColor" opacity="0.20" />
+          ))}
+
+          {/* 正在滴落 */}
           {anim > 0 && anim < 1 && (
-            <circle cx={w*0.5} cy={h*0.5} r={strokeW} fill="currentColor" />
+            <circle cx={w*0.5} cy={h*0.5} r={small?1.4:2.4} fill="currentColor" />
           )}
-          <clipPath id="lowerClip">
-            <path d={`M ${w*0.18} ${h*0.94} L ${w*0.82} ${h*0.94} L ${w*0.5} ${h*0.5} Z`} />
-          </clipPath>
-          <rect x={w*0.18} y={h*0.94 - lowH} width={w*0.64} height={lowH}
-                clipPath="url(#lowerClip)" fill="currentColor" opacity="0.25" />
+
+          {/* 下部粒子（已堆積） */}
+          {Array.from({ length: filled }).map((_, i) => (
+            <circle key={`l${i}`} cx={w*0.5} cy={h*0.86 - i*(h*0.024)} r={small?1.8:3.2} fill="currentColor" opacity="0.28" />
+          ))}
         </svg>
       );
     }
 
-    function randomNiceColor() {
-      const palette = ["#0ea5e9","#22c55e","#f59e0b","#ef4444","#a855f7","#14b8a6"];
-      return palette[Math.floor(Math.random()*palette.length)];
-    }
+    // 固定單色點標（黑色）
+    const dotStyle = { background: '#111' };
 
-    function EditableText({ value, onChange, color }) {
-      const [editing, setEditing] = useState(false);
-      const [val, setVal] = useState(value);
-      useEffect(() => setVal(value), [value]);
+    function EditableText({ value, onChange }) {
+      const [editing, setEditing] = useState(false); const [val, setVal] = useState(value);
+      useEffect(()=>setVal(value),[value]);
       return (
         <div className="flex items-center gap-2">
-          <span className="inline-block w-3 h-3 rounded-full" style={{ background: color }} />
+          <span className="inline-block w-3 h-3 rounded-full" style={dotStyle} />
           {editing ? (
-            <input
-              autoFocus className="rounded-lg border px-2 py-1" value={val}
+            <input autoFocus className="rounded-lg border px-2 py-1" value={val}
               onChange={(e)=>setVal(e.target.value)}
               onBlur={()=>{ setEditing(false); onChange(val.trim()||value); }}
-              onKeyDown={(e)=>{ if(e.key==="Enter"){ setEditing(false); onChange(val.trim()||value); } }}
-            />
+              onKeyDown={(e)=>{ if(e.key==="Enter"){ setEditing(false); onChange(val.trim()||value); } }} />
           ) : (
             <button className="font-semibold" onClick={()=>setEditing(true)}>{value}</button>
           )}
@@ -130,15 +111,11 @@
       const [val, setVal] = useState("");
       return (
         <div className="flex gap-2">
-          <input
-            value={val} onChange={(e)=>setVal(e.target.value)}
-            placeholder="新增習慣（如：英文30分鐘、10,000步）"
-            className="flex-1 rounded-xl border p-2"
-          />
-          <button
-            className="px-4 py-2 rounded-xl bg-black text-white"
-            onClick={()=>{ onAdd(val); setVal(""); }}
-          >新增</button>
+          <input value={val} onChange={(e)=>setVal(e.target.value)} className="flex-1 rounded-xl border p-2"/>
+          <button className="px-4 py-2 rounded-xl bg-black text-white" aria-label="新增" title="新增"
+            onClick={()=>{ onAdd(val); setVal(""); }}>
+            <span className="text-xl leading-none">＋</span>
+          </button>
         </div>
       );
     }
@@ -153,26 +130,22 @@
       return (
         <div className="rounded-2xl bg-white shadow p-4 flex flex-col gap-3">
           <div className="flex items-start justify-between gap-2">
-            <EditableText value={habit.name} onChange={(name)=>onRename(name)} color={habit.color} />
-            <button onClick={onRemove}
-              className="text-xs px-2 py-1 rounded-lg bg-neutral-100 hover:bg-neutral-200"
-              title="刪除習慣">刪除</button>
+            <EditableText value={habit.name} onChange={(name)=>onRename(name)} />
+            <button onClick={onRemove} className="text-xs px-2 py-1 rounded-lg bg-neutral-100 hover:bg-neutral-200" title="刪除">刪除</button>
           </div>
 
           <div className="flex items-center gap-3">
             <Hourglass progress={Math.min(1, progress)} small />
             <div className="space-y-1">
               <div className="text-2xl font-bold">{count} 次</div>
-              <div className="text-xs text-neutral-600">期間：{periodStart} ～ {periodEnd}</div>
+              <div className="text-xs text-neutral-600">{periodStart} ～ {periodEnd}</div>
               <button onClick={onToggleToday}
-                className={`mt-2 px-3 py-2 rounded-xl text-white ${doneToday ? "bg-emerald-500" : "bg-neutral-900"}`}>
-                {doneToday ? "今天已完成（可取消）" : "今天完成 +1 沙"}
-              </button>
+                className={`mt-2 px-3 py-2 rounded-xl ${doneToday ? "bg-neutral-300 text-black" : "bg-black text-white"}`}>+1</button>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-1 text-xs">
-            {inRangeDates.slice(-12).map((d)=>(
+            {inRangeDates.slice(-12).map((d)=> (
               <span key={d} className="px-2 py-1 rounded-lg bg-neutral-100">{d}</span>
             ))}
           </div>
@@ -183,125 +156,81 @@
     function App() {
       const fallback = {
         habits: [
-          { id: uid(), name: "英文30分鐘", color: "#10b981", dates: [] },
-          { id: uid(), name: "運動/走路",  color: "#3b82f6", dates: [] },
+          { id: uid(), name: "英文30分鐘", dates: [] },
+          { id: uid(), name: "運動/走路",  dates: [] },
         ],
-        settings: {
-          rewardName: "吃頓好料",
-          targetSand: 20,
-          periodDays: 30,
-          periodStart: todayKey(),
-        },
+        settings: { rewardName: "吃頓好料", targetSand: 20, periodDays: 30, periodStart: todayKey() },
       };
 
       const [state, setState] = useState(()=> loadState() || fallback);
       const [today] = useState(todayKey());
       useEffect(()=> saveState(state), [state]);
 
-      const periodEnd = useMemo(()=>{
-        const d = new Date(state.settings.periodStart);
-        d.setDate(d.getDate() + state.settings.periodDays - 1);
-        return d.toISOString().slice(0,10);
-      }, [state.settings.periodStart, state.settings.periodDays]);
+      const periodEnd = useMemo(()=>{ const d = new Date(state.settings.periodStart); d.setDate(d.getDate() + state.settings.periodDays - 1); return d.toISOString().slice(0,10); }, [state.settings.periodStart, state.settings.periodDays]);
 
       const inPeriod = (dStr) => dStr >= state.settings.periodStart && dStr <= periodEnd;
-      const totalSand = useMemo(()=>{
-        return state.habits.reduce((acc,h)=> acc + h.dates.filter(inPeriod).length, 0);
-      }, [state.habits, state.settings.periodStart, state.settings.periodDays]);
-
+      const totalSand = useMemo(()=> state.habits.reduce((acc,h)=> acc + h.dates.filter(inPeriod).length, 0), [state.habits, state.settings.periodStart, state.settings.periodDays]);
       const progress = totalSand / Math.max(1, state.settings.targetSand);
 
-      const addHabit = (name) => {
-        if (!name.trim()) return;
-        setState((s)=>({
-          ...s,
-          habits: [...s.habits, { id: uid(), name: name.trim(), color: randomNiceColor(), dates: [] }],
-        }));
-      };
-      const toggleToday = (id) => {
-        setState((s)=>({
-          ...s,
-          habits: s.habits.map((h)=>{
-            if (h.id !== id) return h;
-            const done = h.dates.includes(today);
-            return { ...h, dates: done ? h.dates.filter((d)=>d!==today) : [...h.dates, today] };
-          }),
-        }));
-      };
+      const addHabit = (name) => { if (!name.trim()) return; setState((s)=>({ ...s, habits: [...s.habits, { id: uid(), name: name.trim(), dates: [] }] })); };
+      const toggleToday = (id) => { setState((s)=>({ ...s, habits: s.habits.map((h)=> h.id===id ? { ...h, dates: h.dates.includes(today) ? h.dates.filter((d)=>d!==today) : [...h.dates, today] } : h ) })); };
       const removeHabit = (id) => setState((s)=>({ ...s, habits: s.habits.filter((h)=>h.id!==id) }));
-      const renameHabit = (id, name) => setState((s)=>({
-        ...s, habits: s.habits.map((h)=> h.id===id ? { ...h, name } : h),
-      }));
-      const resetPeriod = () => setState((s)=>({
-        ...s, settings: { ...s.settings, periodStart: todayKey() },
-      }));
+      const renameHabit = (id, name) => setState((s)=>({ ...s, habits: s.habits.map((h)=> h.id===id ? { ...h, name } : h) }));
+      const resetPeriod = () => setState((s)=>({ ...s, settings: { ...s.settings, periodStart: todayKey() } }));
 
       return (
         <div className="min-h-screen bg-neutral-50 text-neutral-800 p-4 md:p-8">
           <div className="mx-auto max-w-4xl grid gap-6">
+            {/* Header 簡潔化：左標題、右今日日期 */}
             <header className="flex items-center justify-between">
-              <h1 className="text-2xl md:text-3xl font-bold">習慣沙漏 Habit Hourglass</h1>
-              <span className="text-sm opacity-70">今天：{today}</span>
+              <h1 className="text-2xl md:text-3xl font-bold">Habit Hourglass</h1>
+              <span className="text-sm opacity-70">{today}</span>
             </header>
 
+            {/* 大沙漏 + 精簡設定 */}
             <section className="grid md:grid-cols-2 gap-6 items-center">
               <div className="flex items-center justify-center"><Hourglass progress={progress} /></div>
               <div className="space-y-3">
-                <h2 className="text-xl font-semibold">大沙漏進度</h2>
                 <div className="text-3xl font-bold tracking-wide">{totalSand} / {state.settings.targetSand}</div>
-                <p className="text-sm text-neutral-600">
-                  期間：{state.settings.periodStart} ～ {periodEnd}（{state.settings.periodDays} 天）
-                </p>
                 <div className="rounded-2xl bg-white shadow p-4 space-y-3">
-                  <label className="block text-sm">達成禮物</label>
-                  <input
-                    className="w-full rounded-xl border p-2"
-                    value={state.settings.rewardName}
-                    onChange={(e)=> setState((s)=>({ ...s, settings: { ...s.settings, rewardName: e.target.value } }))}
-                    placeholder="例如：吃頓好料 / 買想要的東西"
-                  />
+                  <div className="grid grid-cols-2 gap-3 items-end">
+                    <label className="block text-sm">獎勵
+                      <input className="mt-1 w-full rounded-xl border p-2" value={state.settings.rewardName}
+                        onChange={(e)=> setState((s)=>({ ...s, settings: { ...s.settings, rewardName: e.target.value } }))} />
+                    </label>
+                    <div className="text-right text-xs text-neutral-600">{state.settings.periodStart} ～ {periodEnd}</div>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <label className="block text-sm">
-                      目標沙子數
-                      <input type="number" min={1} className="mt-1 w-full rounded-xl border p-2"
-                        value={state.settings.targetSand}
+                    <label className="block text-sm">目標
+                      <input type="number" min={1} className="mt-1 w-full rounded-xl border p-2" value={state.settings.targetSand}
                         onChange={(e)=> setState((s)=>({ ...s, settings: { ...s.settings, targetSand: Math.max(1, Number(e.target.value||1)) } })) }/>
                     </label>
-                    <label className="block text-sm">
-                      期間（天）
-                      <input type="number" min={1} className="mt-1 w-full rounded-xl border p-2"
-                        value={state.settings.periodDays}
+                    <label className="block text-sm">天數
+                      <input type="number" min={1} className="mt-1 w-full rounded-xl border p-2" value={state.settings.periodDays}
                         onChange={(e)=> setState((s)=>({ ...s, settings: { ...s.settings, periodDays: Math.max(1, Number(e.target.value||1)) } })) }/>
                     </label>
                   </div>
-                  <div className="flex gap-3">
-                    <button className="px-3 py-2 rounded-xl bg-black text-white" onClick={resetPeriod}>
-                      新開一期（從今天算）
-                    </button>
-                    <span className="self-center text-sm opacity-70">獎勵：{state.settings.rewardName}</span>
-                  </div>
+                  <div className="flex gap-3"><button className="px-3 py-2 rounded-xl bg-black text-white" onClick={resetPeriod}>新開一期</button></div>
                 </div>
               </div>
             </section>
 
+            {/* 習慣清單 */}
             <section className="space-y-4">
-              <h2 className="text-xl font-semibold">我的習慣</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold">習慣清單</h2>
+              </div>
               <NewHabit onAdd={addHabit} />
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {state.habits.map((h)=>(
+                {state.habits.map((h)=> (
                   <HabitCard key={h.id} habit={h}
                     periodStart={state.settings.periodStart} periodEnd={periodEnd}
-                    onToggleToday={()=>toggleToday(h.id)}
-                    onRemove={()=>removeHabit(h.id)}
-                    onRename={(name)=>renameHabit(h.id, name)}
-                  />
+                    onToggleToday={()=>toggleToday(h.id)} onRemove={()=>removeHabit(h.id)} onRename={(name)=>renameHabit(h.id, name)} />
                 ))}
               </div>
             </section>
 
-            <footer className="text-center text-xs text-neutral-500 py-6">
-              離線可用 · 本地儲存 · 加到主畫面即可像 App
-            </footer>
+            <footer className="text-center text-xs text-neutral-500 py-6">離線可用 · 本地儲存 · 加到主畫面即可像 App</footer>
           </div>
         </div>
       );
