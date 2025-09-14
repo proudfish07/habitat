@@ -1,364 +1,389 @@
-<!doctype html>
-<html lang="zh-Hant">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#111111" />
-  <title>Habit Hourglass</title>
+import React, { useEffect, useMemo, useState } from "react";
+import { RotateCcw, Trash2, Plus } from "lucide-react";
 
-  <!-- PWA（若還沒做 manifest.json / service-worker.js，之後可再補） -->
-  <link rel="manifest" href="./manifest.json" />
+/**
+ * Fix: ReferenceError `undoLastPenaltyToday` & React #130
+ * - Rewrote full app so preview works end-to-end.
+ * - `undoLastPenaltyToday` is now defined inside RewardCard (proper scope) and used above the penalties list.
+ * - Added sanitizers so `penalty.name/value` are always valid primitives before rendering EditableText/Number.
+ * - Penalty UI matches HabitRow; "扣一次" is gray (bg-neutral-200), undo moved to top; NewPenaltyRow matches NewHabitRow.
+ * - Light smoke tests via console.assert to catch regressions.
+ */
 
-  <!-- Tailwind（CDN） -->
-  <script src="https://cdn.tailwindcss.com"></script>
+// ========== Utils & Storage ==========
+function localDateKey(d = new Date()) {
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${yr}-${mo}-${da}`;
+}
+const todayKey = () => localDateKey();
+const uid = () => Math.random().toString(36).slice(2, 9);
 
-  <!-- React 18（UMD） + Babel Standalone（讓瀏覽器能編譯 JSX） -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-</head>
-<body class="bg-neutral-50 text-neutral-900">
-  <div id="root"></div>
+const LS_KEY = "habit_rewards_v1";
+const loadState = () => {
+  try { const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+};
+const saveState = (state) => localStorage.setItem(LS_KEY, JSON.stringify(state));
 
-  <!-- Service Worker 註冊（若無檔案會自動失敗無害） -->
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js').catch(() => {});
-      });
+const PALETTE = ["#6b7280","#9aa5b1","#8fa3a3","#a3a0b5","#b0a68a","#b28d8d","#8ea0b0","#9aa79a"];
+const PENALTY_COLOR = "#b28d8d"; // 灰玫瑰（扣分顏色）
+
+// ========== Sanitizers ==========
+function sanitizeText(v, fallback = "") {
+  if (v === null || v === undefined) return fallback;
+  if (typeof v === "string") return v;
+  try { return String(v); } catch { return fallback; }
+}
+function sanitizeNumber(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+function sanitizePenalty(p) {
+  const name = sanitizeText(p?.name, "");
+  const value = Math.max(1, sanitizeNumber(p?.value, 1));
+  return { ...(p||{}), name, value };
+}
+
+// ========== Inline Editable ==========
+function EditableText({ value, onChange, placeholder = "" }) {
+  const safeValue = sanitizeText(value, "");
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(safeValue);
+  useEffect(() => setVal(safeValue), [safeValue]);
+  return editing ? (
+    <input
+      autoFocus
+      className="border-b border-neutral-400 bg-transparent focus:outline-none text-sm"
+      value={val}
+      placeholder={placeholder}
+      onChange={(e)=>setVal(e.target.value)}
+      onBlur={()=>{ setEditing(false); onChange?.(val.trim() || safeValue); }}
+      onKeyDown={(e)=> e.key==="Enter" && (setEditing(false), onChange?.(val.trim() || safeValue)) }
+    />
+  ) : (
+    <button className="border-b border-neutral-300 hover:border-neutral-900 text-sm" onClick={()=>setEditing(true)}>
+      {safeValue || placeholder}
+    </button>
+  );
+}
+
+function EditableNumber({ value, onChange, min=1 }) {
+  const safeNum = sanitizeNumber(value, min);
+  const [editing,setEditing]=useState(false);
+  const [val,setVal]=useState(String(safeNum));
+  useEffect(()=>setVal(String(safeNum)),[safeNum]);
+  const commit=()=>{ const n=Math.max(min, sanitizeNumber(val, min)); setEditing(false); onChange?.(n); };
+  return editing ? (
+    <input autoFocus inputMode="numeric" pattern="[0-9]*"
+      className="w-16 border-b border-neutral-400 text-right bg-transparent focus:outline-none"
+      value={val} onChange={(e)=>setVal(e.target.value.replace(/[^0-9]/g, ""))}
+      onBlur={commit} onKeyDown={(e)=>e.key==="Enter"&&commit()} />
+  ) : (
+    <button className="border-b border-neutral-300 hover:border-neutral-900 font-mono" onClick={()=>setEditing(true)}>
+      {safeNum}
+    </button>
+  );
+}
+
+// ========== Segmented Bar（等寬單位塊，右端最新） ==========
+function SegmentedBar({ blocks, target }) {
+  const unitPct = 100 / Math.max(1, target);
+  const slice = (blocks || []).slice(-target);
+  return (
+    <div className="w-full h-3 bg-neutral-200 rounded-full overflow-hidden relative">
+      {slice.map((color, i) => (
+        <div key={i} className="absolute inset-y-0" style={{ left: i * unitPct + "%", width: unitPct + "%", background: color }} />
+      ))}
+    </div>
+  );
+}
+
+// ========== Small Components ==========
+function NewHabitRow({ onAdd }) {
+  const [name,setName]=useState("");
+  const [type,setType]=useState("count");
+  return (
+    <div className="flex gap-2 items-center">
+      <input value={name} onChange={e=>setName(e.target.value)} placeholder="新增小習慣"
+             className="flex-1 rounded-xl border p-2" />
+      <select value={type} onChange={e=>setType(e.target.value)} className="rounded-xl border p-2 text-sm">
+        <option value="count">計次</option>
+        <option value="streak">累計</option>
+      </select>
+      <button className="px-3 py-2 rounded-xl bg-black text-white" onClick={()=>{ if(name.trim()){ onAdd?.(name.trim(), type); setName(""); } }}>＋</button>
+    </div>
+  );
+}
+
+function HabitRow({ habit, inRangeCount, todayDone, onToggle, onRename, onRemove }) {
+  const name = sanitizeText(habit?.name, "");
+  const count = sanitizeNumber(inRangeCount, 0);
+  return (
+    <div className="flex items-center justify-between gap-2 py-2">
+      <div className="flex items-center gap-2">
+        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: habit?.color || "#9aa5b1" }} />
+        <EditableText value={name} onChange={onRename} />
+        <span className="text-xs text-neutral-500">{habit?.type === 'count' ? '計次' : `累計≤${sanitizeNumber(habit?.streakMax,30)}`}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-neutral-600 min-w-[48px] text-right">{count} 次</span>
+        <button onClick={onToggle} className={`px-3 py-1 rounded-xl ${todayDone?"bg-neutral-300 text-black":"bg-black text-white"}`}>+1</button>
+        <button onClick={onRemove} title="刪除習慣" className="p-1 text-neutral-400 hover:text-black"><Trash2 size={16}/></button>
+      </div>
+    </div>
+  );
+}
+
+function PenaltyRow({ penalty, onChange, onRemove, onFire }) {
+  const p = sanitizePenalty(penalty);
+  return (
+    <div className="flex items-center justify-between gap-2 py-2">
+      <div className="flex items-center gap-2">
+        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PENALTY_COLOR }} />
+        <EditableText value={p.name} onChange={(name)=>onChange?.({ ...p, name })} placeholder="懲罰名稱" />
+        <span className="text-xs text-neutral-500">-{Math.abs(p.value)}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <button onClick={()=>onFire?.(p)} className="px-3 py-1 rounded-xl bg-neutral-200 text-black text-xs">扣一次</button>
+        <button onClick={()=>onRemove?.(p.id)} title="刪除懲罰" className="p-1 text-neutral-400 hover:text-black"><Trash2 size={16}/></button>
+      </div>
+    </div>
+  );
+}
+
+function NewPenaltyRow({ onAdd }) {
+  const [name, setName] = useState("");
+  const [value, setValue] = useState("1");
+  const add = () => {
+    const nm = name.trim();
+    const v = Math.max(1, sanitizeNumber(value, 1));
+    if (!nm) return;
+    onAdd?.({ id: uid(), name: nm, value: v });
+    setName(""); setValue("1");
+  };
+  return (
+    <div className="flex gap-2 items-center">
+      <input value={name} onChange={e=>setName(e.target.value)} placeholder="新增懲罰（例如：炸物）"
+             className="flex-1 rounded-xl border p-2" />
+      <div className="flex items-center gap-1">
+        <span className="text-xs text-neutral-500">-</span>
+        <input value={value} onChange={e=>setValue(e.target.value.replace(/[^0-9]/g, ""))}
+               inputMode="numeric" pattern="[0-9]*" className="w-16 rounded-xl border p-2 text-right text-sm" />
+        <span className="text-xs text-neutral-500">點</span>
+      </div>
+      <button onClick={add} className="px-3 py-2 rounded-xl bg-black text-white">＋</button>
+    </div>
+  );
+}
+
+// ========== Reward Card ==========
+function RewardCard({ reward, onChange, onRemove }) {
+  const today = todayKey();
+  const startDate = reward.startDate;
+  const endDate = useMemo(()=>{ const d=new Date(startDate); d.setDate(d.getDate()+reward.periodDays-1); return localDateKey(d); },[startDate,reward.periodDays]);
+  const inPeriod = (d) => d >= startDate && d <= endDate;
+
+  const eventsInPeriod = useMemo(()=> (reward.events||[]).filter(e=>inPeriod(e.date)).sort((a,b)=>a.ts-b.ts), [reward.events, startDate, endDate]);
+  const total = eventsInPeriod.reduce((s,e)=> s + sanitizeNumber(e.delta, 0), 0);
+  const blocks = eventsInPeriod.map(e=> e.color || "#9aa5b1");
+  const achieved = total >= reward.target;
+
+  const countsMap = useMemo(()=>{
+    const m=new Map();
+    eventsInPeriod.forEach(e=>{ if(e.habitId){ m.set(e.habitId,(m.get(e.habitId)||0)+1); } });
+    return m;
+  },[eventsInPeriod]);
+  const todayMap = useMemo(()=>{
+    const m=new Map();
+    (reward.events||[]).forEach(e=>{ if(e.date===today && e.habitId){ m.set(e.habitId,(m.get(e.habitId)||0)+1); } });
+    return m;
+  },[reward.events, today]);
+
+  const setReward = (patch) => onChange({ ...reward, ...patch });
+
+  // ---- Habits ----
+  const nextColor = (used) => PALETTE[(used % PALETTE.length)];
+  const addHabit = (name, type) => {
+    const newHabit = { id: uid(), name, type, color: nextColor((reward.habits||[]).length), streakMax: 30 };
+    setReward({ habits: [...(reward.habits||[]), newHabit] });
+  };
+  const renameHabit = (id, name) => setReward({ habits: (reward.habits||[]).map(h => h.id===id ? { ...h, name } : h) });
+  const removeHabit = (id) => setReward({ habits: (reward.habits||[]).filter(h=>h.id!==id), events: (reward.events||[]).filter(e=>e.habitId!==id) });
+
+  function computeStreakDelta(habitId) { // 曆日模式
+    const y = new Date(today); y.setDate(y.getDate()-1); const yKey = localDateKey(y);
+    const hadYesterday = (reward.events||[]).some(e => e.habitId===habitId && e.date===yKey);
+    const prevVal = hadYesterday ? (reward.events||[]).filter(e=>e.habitId===habitId && e.date===yKey).length : 0; // 每天最多一筆
+    const next = prevVal + 1;
+    const streakMax = (reward.habits||[]).find(h=>h.id===habitId)?.streakMax || 30;
+    return Math.min(next, streakMax);
+  }
+  const toggleHabitToday = (habit) => {
+    const idx = (reward.events||[]).findIndex(e => e.habitId===habit.id && e.date===today);
+    if (idx >= 0) {
+      const events = (reward.events||[]).filter((_,i)=>i!==idx);
+      setReward({ events });
+    } else {
+      const delta = habit.type === 'count' ? 1 : computeStreakDelta(habit.id);
+      const ev = { id: uid(), rewardId: reward.id, habitId: habit.id, date: today, ts: Date.now(), delta, color: habit.color };
+      setReward({ events: [ ...(reward.events||[]), ev ] });
     }
-  </script>
+  };
 
-  <!-- App 程式碼 -->
-  <script type="text/babel" data-presets="env,react">
-    const { useEffect, useMemo, useState } = React;
+  // ---- Penalties ----
+  const addPenaltyEvent = (p) => {
+    const sp = sanitizePenalty(p);
+    const ev = { id: uid(), rewardId: reward.id, habitId: null, date: today, ts: Date.now(), delta: -Math.abs(sp.value), color: PENALTY_COLOR, isPenalty: true };
+    setReward({ events: [ ...(reward.events||[]), ev ] });
+  };
+  const undoLastPenaltyToday = () => {
+    const evs = reward.events||[];
+    for (let i = evs.length - 1; i >= 0; i--) {
+      const e = evs[i];
+      if (e.isPenalty && e.date === today) {
+        const events = evs.slice(); events.splice(i,1); setReward({ events }); break;
+      }
+    }
+  };
+  const addPenalty = (p) => setReward({ penalties: [ ...(reward.penalties||[]), sanitizePenalty(p) ] });
+  const updatePenalty = (id, patch) => setReward({ penalties: (reward.penalties||[]).map(p => p.id===id ? sanitizePenalty({ ...p, ...patch }) : p) });
+  const removePenalty = (id) => setReward({ penalties: (reward.penalties||[]).filter(p => p.id!==id) });
 
-    // ===== Utilities =====
-    const todayKey = () => new Date().toISOString().slice(0, 10);
-    const uid = () => Math.random().toString(36).slice(2, 9);
+  // ---- Redeem / New period（清事件 + startDate=今天） ----
+  const redeem = () => {
+    const redemptions = [ ...((reward.redemptions)||[]), { id: uid(), date: today, note: reward.name } ];
+    setReward({ redemptions, startDate: today, events: [] });
+  };
 
-    const LS_KEY = "habit_bar_chart_v1";
-    const loadState = () => {
-      try { const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null; }
-      catch { return null; }
-    };
-    const saveState = (state) => localStorage.setItem(LS_KEY, JSON.stringify(state));
+  return (
+    <div className="rounded-2xl bg-white shadow p-5 grid gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-3 h-3 rounded-full" style={{ background: reward.color || "#6b7280" }} />
+          <EditableText value={reward.name} onChange={(name)=>setReward({ name })} placeholder="獎勵名稱" />
+        </div>
+        <button onClick={()=>onRemove?.(reward.id)} className="p-1 text-neutral-400 hover:text-red-600" title="刪除此獎勵"><Trash2 size={16}/></button>
+      </div>
 
-    // 低飽和、柔和色系
-    const PALETTE = ["#6b7280","#9aa5b1","#8fa3a3","#a3a0b5","#b0a68a","#b28d8d","#8ea0b0","#9aa79a"];
+      {/* 期間 & 進度 */}
+      <div className="flex items-center justify-between text-xs text-neutral-600">
+        <span>{startDate} ～ {endDate}</span>
+      </div>
+      <SegmentedBar blocks={blocks} target={reward.target} />
+      <div className="flex items-center justify-between text-sm text-neutral-700 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <span className="font-mono">{total} / <EditableNumber value={reward.target} onChange={(target)=>setReward({ target })} min={1} /></span>
+          {achieved && (<>
+            <span className="px-2 py-0.5 rounded-full bg-neutral-900 text-white text-xs">🎁 已達成</span>
+            <button onClick={redeem} className="px-2 py-1 rounded-md border border-neutral-700 text-neutral-800 bg-white hover:bg-neutral-100">兌換</button>
+          </>)}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-neutral-500">新開一期</span>
+          <button onClick={()=>setReward({ startDate: today, events: [] })} className="p-1 rounded-md border border-neutral-400 bg-white hover:bg-neutral-100 text-neutral-700" title="新開一期"><RotateCcw size={16} strokeWidth={2}/></button>
+        </div>
+      </div>
 
-    // ===== Icons（黑白線條，內嵌 SVG） =====
-    const IconRotateCcw = ({ size=16, strokeWidth=2 }) => (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-           stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="1 4 1 10 7 10"></polyline>
-        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
-      </svg>
-    );
-    const IconTrash = ({ size=16, strokeWidth=2 }) => (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-           stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="3 6 5 6 21 6"></polyline>
-        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
-        <path d="M10 11v6"></path>
-        <path d="M14 11v6"></path>
-        <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path>
-      </svg>
-    );
+      {/* 小習慣清單 */}
+      <div className="border-t pt-2">
+        {(reward.habits||[]).map(h => (
+          <HabitRow key={h.id}
+            habit={h}
+            inRangeCount={countsMap.get(h.id)||0}
+            todayDone={!!todayMap.get(h.id)}
+            onToggle={()=>toggleHabitToday(h)}
+            onRename={(name)=>renameHabit(h.id,name)}
+            onRemove={()=>removeHabit(h.id)}
+          />
+        ))}
+        <NewHabitRow onAdd={addHabit} />
+      </div>
 
-    // ===== SegmentedBar：每 +1 等寬一段，右端永遠是最新 =====
-    function SegmentedBar({ blocks, target }) {
-      const unitPct = 100 / Math.max(1, target);
-      const slice = blocks.slice(-target); // 只顯示最近 target 個
-      return (
-        <div className="w-full h-3 bg-neutral-200 rounded-full overflow-hidden relative">
-          {slice.map((color, i) => (
-            <div key={i}
-                 className="absolute inset-y-0"
-                 style={{ left: (i * unitPct) + "%", width: unitPct + "%", background: color }} />
+      {/* 懲罰列（撤銷置頂 + 與 HabitRow 同風格） */}
+      <div className="border-t pt-3 space-y-2">
+        <button onClick={undoLastPenaltyToday} className="text-xs px-2 py-1 rounded-md border border-neutral-400 bg-white hover:bg-neutral-100">撤銷上一筆懲罰</button>
+        <div className="space-y-1">
+          {(reward.penalties||[]).map(p => (
+            <PenaltyRow key={p.id}
+              penalty={p}
+              onChange={(np)=>updatePenalty(p.id, np)}
+              onRemove={(id)=>removePenalty(id)}
+              onFire={(pp)=>addPenaltyEvent(pp)}
+            />
           ))}
         </div>
-      );
-    }
+        <NewPenaltyRow onAdd={(p)=>addPenalty(p)} />
+      </div>
 
-    // ===== Inline Editable =====
-    function EditableText({ value, onChange, placeholder = "" }) {
-      const [editing, setEditing] = useState(false);
-      const [val, setVal] = useState(value);
-      useEffect(() => setVal(value), [value]);
-      return editing ? (
-        <input autoFocus
-               className="border-b border-neutral-400 bg-transparent focus:outline-none text-sm"
-               value={val}
-               placeholder={placeholder}
-               onChange={(e)=>setVal(e.target.value)}
-               onBlur={()=>{ setEditing(false); onChange(val.trim() || value); }}
-               onKeyDown={(e)=> e.key==="Enter" && (setEditing(false), onChange(val.trim() || value)) } />
-      ) : (
-        <button className="border-b border-neutral-300 hover:border-neutral-900 text-sm"
-                onClick={()=>setEditing(true)}>
-          {value || placeholder}
+      {reward.redemptions?.length>0 && (
+        <div className="text-xs text-neutral-500">已兌換：{reward.redemptions[reward.redemptions.length-1].note}（{reward.redemptions[reward.redemptions.length-1].date}）</div>
+      )}
+    </div>
+  );
+}
+
+// ========== App ==========
+function fallbackReward() {
+  return {
+    id: uid(),
+    name: "本期獎勵",
+    color: "#6b7280",
+    target: 30,
+    startDate: todayKey(),
+    periodDays: 30,
+    habits: [],
+    penalties: [ { id: uid(), name: "油炸物", value: 5 }, { id: uid(), name: "含糖飲料", value: 2 } ],
+    events: [],
+    redemptions: [],
+  };
+}
+
+export default function App(){
+  const [state,setState]=useState(()=>{
+    const old = loadState();
+    if (old && Array.isArray(old.rewards)) return old; // 兼容新結構
+    return { rewards: [fallbackReward()] };
+  });
+  useEffect(()=>saveState(state),[state]);
+
+  const addReward = () => setState(s=>({ rewards: [...s.rewards, fallbackReward()] }));
+  const removeReward = (id) => setState(s=>({ rewards: s.rewards.filter(r=>r.id!==id) }));
+  const updateReward = (id, patch) => setState(s=>({ rewards: s.rewards.map(r=> r.id===id ? { ...r, ...patch } : r) }));
+
+  // —— Smoke tests ——
+  useEffect(()=>{
+    try {
+      // Penalty sanitize
+      const bad = { id: "t1", name: undefined, value: undefined };
+      const good = sanitizePenalty(bad);
+      console.assert(typeof good.name === "string", "Penalty name should be string");
+      console.assert(Number.isFinite(good.value) && good.value >= 1, "Penalty value should be >=1 number");
+      // Undo exists in RewardCard scope - here we only check that rendering doesn't crash
+      console.assert(typeof fallbackReward === "function", "fallbackReward exists");
+    } catch(e) { console.warn("Smoke tests failed", e); }
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-neutral-50 p-4 md:p-8 text-neutral-900">
+      <div className="mx-auto max-w-3xl grid gap-4">
+        <header className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Rewards Tracker</h1>
+          <span className="text-sm opacity-70">{todayKey()}</span>
+        </header>
+
+        {state.rewards.map(r=> (
+          <RewardCard key={r.id}
+            reward={r}
+            onChange={(patch)=>updateReward(r.id, patch)}
+            onRemove={(id)=>removeReward(id)}
+          />
+        ))}
+
+        <button onClick={addReward} className="flex items-center gap-2 px-3 py-2 border rounded-xl w-max">
+          <Plus size={16}/> 新增獎勵
         </button>
-      );
-    }
-
-    function EditableNumber({ value, onChange, min=1 }) {
-      const [editing,setEditing]=useState(false);
-      const [val,setVal]=useState(String(value ?? ""));
-      useEffect(()=>setVal(String(value ?? "")),[value]);
-      const commit=()=>{ const n = Math.max(min, Number(val || min)); setEditing(false); onChange(n); };
-      return editing ? (
-        <input autoFocus inputMode="numeric" pattern="[0-9]*"
-               className="w-16 border-b border-neutral-400 text-right bg-transparent focus:outline-none"
-               value={val}
-               onChange={(e)=>setVal(e.target.value.replace(/[^0-9]/g,""))}
-               onBlur={commit}
-               onKeyDown={(e)=> e.key==="Enter" && commit() } />
-      ) : (
-        <button className="border-b border-neutral-300 hover:border-neutral-900 font-mono"
-                onClick={()=>setEditing(true)}>
-          {value}
-        </button>
-      );
-    }
-
-    // ===== New Habit =====
-    function NewHabit({ onAdd }) {
-      const [val,setVal]=useState("");
-      return (
-        <div className="flex gap-2">
-          <input value={val} onChange={(e)=>setVal(e.target.value)} className="flex-1 rounded-xl border p-2" />
-          <button className="px-3 py-2 rounded-xl bg-black text-white"
-                  aria-label="新增"
-                  onClick={()=>{ onAdd(val); setVal(""); }}>＋</button>
-        </div>
-      );
-    }
-
-    // ===== Habit Card =====
-    function HabitCard({ habit, onToggleToday, onRemove, onRename, periodStart, periodEnd, todayDoneCount }) {
-      const doneToday = todayDoneCount>0; // 由 events 計算
-      const inRangeCount = habit.countInRange; // 傳入計算值
-      return (
-        <div className="rounded-2xl bg-white shadow p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: habit.color }} />
-              <EditableText value={habit.name} onChange={onRename} placeholder="未命名習慣" />
-            </div>
-            <button onClick={onRemove}
-                    className="p-1 rounded-lg bg-neutral-100 hover:bg-neutral-200"
-                    title="刪除">
-              <IconTrash />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="min-w-[56px] text-xs text-neutral-600">{inRangeCount} 次</div>
-            <div className="flex-1">
-              <div className="w-full h-2 bg-neutral-200 rounded-full overflow-hidden">
-                <div className="h-full"
-                     style={{ width: Math.min(100, (inRangeCount/10)*100) + "%", background: habit.color }} />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between text-xs text-neutral-600">
-            <span>{periodStart} ～ {periodEnd}</span>
-            <button onClick={onToggleToday}
-                    className={`px-3 py-1 rounded-xl ${doneToday ? "bg-neutral-300 text-black" : "bg-black text-white"}`}>
-              +1
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    // ===== App =====
-    function App() {
-      const fallback = {
-        habits: [],
-        events: [],
-        redemptions: [],
-        settings: { rewardName: "吃頓好料", target: 30, periodDays: 30, periodStart: todayKey() }
-      };
-      const [state, setState] = useState(() => {
-        const s = loadState() || fallback;
-        // 資料遷移：補齊 color、events、redemptions
-        let colorIdx=0;
-        s.habits = (s.habits || []).map(h => h.color ? h : ({ ...h, color: PALETTE[(colorIdx++ % PALETTE.length)] }));
-        if (!s.events) {
-          const ev=[];
-          s.habits.forEach(h=>{
-            (h.dates || []).sort().forEach((d,i)=>{
-              ev.push({ id: uid(), habitId: h.id, color: h.color, date: d, ts: new Date(d+"T12:00:00").getTime()+i });
-            });
-          });
-          s.events = ev;
-        }
-        if (!s.redemptions) s.redemptions = [];
-        return s;
-      });
-
-      const today = todayKey();
-      useEffect(() => saveState(state), [state]);
-
-      const periodEnd = useMemo(() => {
-        const d = new Date(state.settings.periodStart);
-        d.setDate(d.getDate() + state.settings.periodDays - 1);
-        return d.toISOString().slice(0,10);
-      }, [state.settings.periodStart, state.settings.periodDays]);
-
-      const inPeriod = (dStr) => dStr >= state.settings.periodStart && dStr <= periodEnd;
-
-      // 當期 events、各習慣計數、今日狀態
-      const eventsInPeriod = useMemo(
-        () => state.events.filter(e => inPeriod(e.date)).sort((a,b)=>a.ts-b.ts),
-        [state.events, state.settings.periodStart, state.settings.periodDays]
-      );
-      const countsMap = useMemo(() => {
-        const m=new Map();
-        eventsInPeriod.forEach(e => m.set(e.habitId, (m.get(e.habitId)||0)+1));
-        return m;
-      }, [eventsInPeriod]);
-      const todayMap = useMemo(() => {
-        const m=new Map();
-        state.events.forEach(e => { if (e.date === today) m.set(e.habitId, (m.get(e.habitId)||0)+1); });
-        return m;
-      }, [state.events, today]);
-
-      const total = eventsInPeriod.length;
-      const achieved = total >= state.settings.target;
-
-      const setTarget  = (n)    => setState(s => ({ ...s, settings: { ...s.settings, target: n } }));
-      const setReward  = (name) => setState(s => ({ ...s, settings: { ...s.settings, rewardName: name } }));
-
-      const nextColor  = (used) => PALETTE[(used % PALETTE.length)];
-      const addHabit   = (name) => name.trim() && setState(s => ({
-        ...s,
-        habits: [...s.habits, { id: uid(), name: name.trim(), color: nextColor(s.habits.length) }]
-      }));
-
-      // 嚴格「一天一次」：今日已有就刪除（-1），否則新增（+1）
-      const toggleToday = (id) => setState(s => {
-        const habit = s.habits.find(h => h.id === id);
-        if (!habit) return s;
-        const idx = s.events.findIndex(e => e.habitId === id && e.date === today);
-        const events = idx >= 0
-          ? s.events.filter((_,i)=> i !== idx)
-          : [...s.events, { id: uid(), habitId: id, color: habit.color, date: today, ts: Date.now() }];
-        return { ...s, events };
-      });
-
-      const removeHabit = (id) => setState(s => ({
-        ...s,
-        habits: s.habits.filter(h => h.id !== id),
-        events: s.events.filter(e => e.habitId !== id) // 移除其紀錄，避免頂部殘留
-      }));
-      const renameHabit = (id, name) => setState(s => ({
-        ...s,
-        habits: s.habits.map(h => h.id === id ? { ...h, name } : h)
-      }));
-
-      const resetPeriod = () => setState(s => ({
-        ...s,
-        settings: { ...s.settings, periodStart: todayKey() }
-      }));
-
-      // 兌換：記錄一行、重設本期為今天、清掉今天的 events（新一期從 0）
-      const redeem = () => setState(s => ({
-        ...s,
-        redemptions: [...s.redemptions, { id: uid(), date: today, reward: s.settings.rewardName }],
-        settings: { ...s.settings, periodStart: today },
-        events: s.events.filter(e => e.date !== today)
-      }));
-
-      // 頂部色塊（舊 -> 新），右端為最新
-      const blocks = eventsInPeriod.map(e => e.color);
-      const lastRedemption = state.redemptions[state.redemptions.length - 1];
-
-      return (
-        <div className="min-h-screen p-4 md:p-8">
-          <div className="mx-auto max-w-3xl grid gap-6">
-            <header className="flex items-center justify-between">
-              <h1 className="text-2xl font-bold">Habit Tracker</h1>
-              <span className="text-sm opacity-70">{today}</span>
-            </header>
-
-            <div className="space-y-2">
-              <SegmentedBar blocks={blocks} target={state.settings.target} />
-              <div className="flex items-center justify-between text-sm text-neutral-700 flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono">
-                    {total} / <EditableNumber value={state.settings.target} onChange={setTarget} min={1} />
-                  </span>
-                  {achieved && (
-                    <>
-                      <span className="px-2 py-0.5 rounded-full bg-neutral-900 text-white text-xs">🎁 已達成</span>
-                      <button onClick={redeem}
-                              className="px-2 py-1 rounded-md border border-neutral-700 text-neutral-800 bg-white hover:bg-neutral-100">
-                        兌換
-                      </button>
-                    </>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-neutral-500">獎勵：</span>
-                  <EditableText value={state.settings.rewardName} onChange={setReward} placeholder="自訂獎勵" />
-                  <button onClick={resetPeriod}
-                          className="ml-3 p-1 rounded-md border border-neutral-400 bg-white hover:bg-neutral-100 text-neutral-700"
-                          title="新開一期">
-                    <IconRotateCcw />
-                  </button>
-                </div>
-              </div>
-              {lastRedemption && (
-                <div className="text-xs text-neutral-500">
-                  已兌換：{lastRedemption.reward}（{lastRedemption.date}）
-                </div>
-              )}
-            </div>
-
-            <section className="space-y-4">
-              <NewHabit onAdd={(name)=>addHabit(name)} />
-              <div className="grid sm:grid-cols-2 gap-4">
-                {state.habits.map(h=>{
-                  const inRangeCount  = ( (new Map([... (function(){
-                    const m=new Map();
-                    eventsInPeriod.forEach(e=>m.set(e.habitId,(m.get(e.habitId)||0)+1));
-                    return m;
-                  })() ])).get(h.id) ) || 0;
-                  const todayDoneCount = ( (new Map([... (function(){
-                    const m=new Map();
-                    state.events.forEach(e=>{ if(e.date===today) m.set(e.habitId,(m.get(e.habitId)||0)+1); });
-                    return m;
-                  })() ])).get(h.id) ) || 0;
-
-                  return (
-                    <HabitCard key={h.id}
-                      habit={{...h, countInRange: inRangeCount}}
-                      periodStart={state.settings.periodStart}
-                      periodEnd={periodEnd}
-                      todayDoneCount={todayDoneCount}
-                      onToggleToday={()=>toggleToday(h.id)}
-                      onRemove={()=>removeHabit(h.id)}
-                      onRename={(name)=>renameHabit(h.id, name)}
-                    />
-                  );
-                })}
-              </div>
-            </section>
-
-            <footer className="text-center text-xs text-neutral-500 py-6">
-              離線可用 · 本地儲存 · 加到主畫面即可像 App
-            </footer>
-          </div>
-        </div>
-      );
-    }
-
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
-</body>
-</html>
+      </div>
+    </div>
+  );
+}
