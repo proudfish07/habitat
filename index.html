@@ -1,4 +1,30 @@
-import React, { useEffect, useMemo, useState } from "react";
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="manifest" href="./manifest.json" />
+  <meta name="theme-color" content="#111111" />
+  <title>Habit Hourglass</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & Babel -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-neutral-50">
+  <div id="root"></div>
+
+  <!-- 註冊 service worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js'));
+    }
+  </script>
+
+  <!-- 直接貼你的 React 程式 -->
+  <script type="text/babel">
+  import React, { useEffect, useMemo, useState } from "react";
 import { RotateCcw, Trash2, Plus } from "lucide-react";
 
 /**
@@ -387,3 +413,9 @@ export default function App(){
     </div>
   );
 }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
