@@ -268,9 +268,9 @@
       // ---- Penalties ----
       const addPenaltyEvent = (p) => {
         const sp = sanitizePenalty(p);
-        theEv = { id: uid(), rewardId: reward.id, habitId: null, date: today, ts: Date.now(), delta: -Math.abs(sp.value), color: PENALTY_COLOR, isPenalty: true };
+        const ev = { id: uid(), rewardId: reward.id, habitId: null, date: today, ts: Date.now(),delta: -Math.abs(sp.value), color: PENALTY_COLOR, isPenalty: true };
         const evs = reward.events || [];
-        setReward({ events: [ ...evs, theEv ] });
+        setReward({ events: [ ...evs, ev ] });
       };
       const undoLastPenaltyToday = () => {
         const evs = reward.events||[];
