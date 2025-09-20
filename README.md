@@ -1,4 +1,4 @@
-Habit Hourglass (MVP) – README
+#Habit Hourglass (MVP) – README
 
 一個零後端、可離線使用的習慣與獎勵追蹤器。單一 index.html 檔即可運行，資料存在瀏覽器 localStorage。
 
