@@ -134,24 +134,19 @@
     // ========== Small Components ==========
     function NewHabitRow({ onAdd }){
       const [name, setName] = useState("");
-      const [type, setType] = useState("count");
       const [value, setValue] = useState("1");
     
       const add = ()=>{
         const nm = name.trim();
         const v = Math.max(1, Number(value||1));
         if(!nm) return;
-        onAdd?.(nm, type, v);
-        setName(""); setType("count"); setValue("1");
+        onAdd?.(nm, v);
+        setName(""); setValue("1");
       };
     
       return (
         <div className="flex gap-2 items-center">
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="新增小習慣" className="flex-1 rounded-xl border p-2"/>
-          <select value={type} onChange={e=>setType(e.target.value)} className="rounded-xl border p-2 text-sm">
-            <option value="count">計次</option>
-            <option value="streak">累計</option>
-          </select>
           <div className="flex items-center gap-1">
             <span className="text-xs text-neutral-500">加多少</span>
             <input className="w-16 rounded-xl border p-2 text-right text-sm" inputMode="numeric" pattern="[0-9]*"
@@ -165,19 +160,24 @@
 
 
 
-    function HabitRow({ habit, todayDone, countInPeriod=0, onToggle, onRename, onRemove }){
+    function HabitRow({ habit, todayDone, countInPeriod=0, streakDelta=1, onToggle, onRename, onRemove }){
       const name = sanitizeText(habit?.name, "");
       const inc = Math.max(1, sanitizeNumber(habit?.value, 1));
+      const thisAdd = inc * Math.max(1, sanitizeNumber(streakDelta, 1));
+    
       return (
         <div className="flex items-center justify-between gap-2 py-2">
           <div className="flex items-center gap-2">
             <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: habit?.color || "#9aa5b1" }} />
             <EditableText value={name} onChange={newName=>onRename({ ...habit, name: newName })} />
-            <span className="text-xs text-neutral-500">＋{inc} 點</span>
+            <span className="text-xs text-neutral-500">＋{thisAdd} 點</span>
             <span className="text-xs text-neutral-500">（本期 {countInPeriod} 次）</span>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={onToggle} className={`px-3 py-1 rounded-xl ${todayDone?"bg-neutral-300 text-black":"bg-black text-white"}`}>
+            <button
+              onClick={onToggle}
+              className={`px-3 py-1 rounded-xl ${todayDone ? "bg-neutral-300 text-black" : "bg-black text-white"}`}
+            >
               達成
             </button>
             <button onClick={onRemove} title="刪除習慣" className="p-1 text-neutral-400 hover:text-black"><IconTrash/></button>
@@ -185,6 +185,7 @@
         </div>
       );
     }
+
 
 
     function PenaltyRow({ penalty, countInPeriod = 0, onChange, onRemove, onFire }) {
@@ -275,10 +276,16 @@
 
       // ---- Habits ----
       const nextColor = (used) => PALETTE[(used % PALETTE.length)];
-      const addHabit = (name, type, value=1) => {
-        const newHabit = { id: uid(), name, type, color: nextColor((reward.habits||[]).length), streakMax: 30, value: Math.max(1, Number(value||1)) };
-        setReward({ habits: [...(reward.habits||[]), newHabit] });
+      const addHabit = (name, value=1) => {
+        const newHabit = {
+          id: uid(),
+          name,
+          color: nextColor((reward.habits||[]).length),
+          value: Math.max(1, Number(value||1))
+        };
+        setReward({ habits: [ ...(reward.habits||[]), newHabit ] });
       };
+
 
       const renameHabit = (id, next) => setReward({
         habits: (reward.habits||[]).map(h => {
@@ -317,7 +324,8 @@
           setReward({ events });
         } else {
           const inc = Math.max(1, sanitizeNumber(habit.value, 1));
-          const delta = inc; 
+          const delta = inc * computeStreakDelta(habit.id);
+
           
           const ev = { id: uid(), rewardId: reward.id, habitId: habit.id, date: today, ts: Date.now(), delta, color: habit.color };
 
@@ -403,11 +411,11 @@
                 habit={h}
                 todayDone={!!todayMap.get(h.id)}
                 countInPeriod={countsMap.get(h.id)||0}
+                streakDelta={computeStreakDelta(h.id)}
                 onToggle={()=>toggleHabitToday(h)}
                 onRename={(next)=>renameHabit(h.id, next)}
                 onRemove={()=>removeHabit(h.id)}
               />
-
             ))}
 
             <NewHabitRow onAdd={addHabit} />
