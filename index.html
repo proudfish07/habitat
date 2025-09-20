@@ -170,6 +170,7 @@
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-neutral-600 min-w-[48px] text-right">{count} 次</span>
+            <span className="text-xs text-neutral-500">{todayDone ? `今日 +${nextDelta}` : `本次 +${nextDelta}`}</span> {/* << 新增：這次會加多少 */}
             <button onClick={onToggle} className={`px-3 py-1 rounded-xl ${todayDone?"bg-neutral-300 text-black":"bg-black text-white"}`}>+1</button>
             <button onClick={onRemove} title="刪除習慣" className="p-1 text-neutral-400 hover:text-black"><IconTrash/></button>
           </div>
@@ -177,7 +178,7 @@
       );
     }
 
-    function PenaltyRow({ penalty, onChange, onRemove, onFire }) {
+    function PenaltyRow({ penalty, countInPeriod = 0, onChange, onRemove, onFire }) {
       const p = sanitizePenalty(penalty);
       return (
         <div className="flex items-center justify-between gap-2 py-2">
@@ -185,6 +186,7 @@
             <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PENALTY_COLOR }} />
             <EditableText value={p.name} onChange={(name)=>onChange?.({ ...p, name })} placeholder="懲罰名稱" />
             <span className="text-xs text-neutral-500">-{Math.abs(p.value)}</span>
+            <span className="text-xs text-neutral-500">（本期 {countInPeriod} 次）</span> {/* << 新增：顯示次數 */}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={()=>onFire?.(p)} className="px-3 py-1 rounded-xl bg-neutral-200 text-black text-xs">扣一次</button>
@@ -193,6 +195,7 @@
         </div>
       );
     }
+
 
     function NewPenaltyRow({ onAdd }) {
       const [name, setName] = useState("");
@@ -220,6 +223,16 @@
     }
 
     // ========== Reward Card ==========
+
+
+    
+    function nextHabitDelta(h) {
+      const inc = Math.max(1, sanitizeNumber(h.value, 1));
+      return h.type === 'count' ? inc : computeStreakDelta(h.id) * inc;
+    }
+
+
+    
     function RewardCard({ reward, onChange, onRemove }) {
       const today = todayKey();
       const startDate = reward.startDate;
@@ -236,6 +249,16 @@
       const total = eventsInPeriod.reduce((s,e)=> s + sanitizeNumber(e.delta, 0), 0);
       const blocks = eventsInPeriod.map(e=> e.color || "#9aa5b1");
       const achieved = total >= reward.target;
+
+      const penaltyCountMap = useMemo(() => {
+        const m = new Map();
+        eventsInPeriod.forEach(e => {
+          if (e.isPenalty && e.penaltyId) {
+            m.set(e.penaltyId, (m.get(e.penaltyId) || 0) + 1);
+          }
+        });
+        return m;
+      }, [eventsInPeriod]);
 
       const countsMap = useMemo(()=>{
         const m=new Map();
@@ -313,10 +336,21 @@
       // ---- Penalties ----
       const addPenaltyEvent = (p) => {
         const sp = sanitizePenalty(p);
-        const ev = { id: uid(), rewardId: reward.id, habitId: null, date: today, ts: Date.now(),delta: -Math.abs(sp.value), color: PENALTY_COLOR, isPenalty: true };
+        const ev = {
+          id: uid(),
+          rewardId: reward.id,
+          habitId: null,
+          penaltyId: sp.id,         // << 新增：標記是哪個懲罰
+          date: today,
+          ts: Date.now(),
+          delta: -Math.abs(sp.value),
+          color: PENALTY_COLOR,
+          isPenalty: true
+        };
         const evs = reward.events || [];
         setReward({ events: [ ...evs, ev ] });
       };
+
       const undoLastPenaltyToday = () => {
         const evs = reward.events||[];
         for (let i = evs.length - 1; i >= 0; i--) {
@@ -378,6 +412,7 @@
                 habit={h}
                 inRangeCount={countsMap.get(h.id)||0}
                 todayDone={!!todayMap.get(h.id)}
+                nextDelta={nextHabitDelta(h)}  
                 onToggle={()=>toggleHabitToday(h)}
                 onRename={(next)=>renameHabit(h.id, next)}
                 onRemove={()=>removeHabit(h.id)}
@@ -393,6 +428,7 @@
               {(reward.penalties||[]).map(p => (
                 <PenaltyRow key={p.id}
                   penalty={p}
+                  countInPeriod={penaltyCountMap.get(p.id) || 0}   // << 新增：本期次數
                   onChange={(np)=>updatePenalty(p.id, np)}
                   onRemove={(id)=>removePenalty(id)}
                   onFire={(pp)=>addPenaltyEvent(pp)}
