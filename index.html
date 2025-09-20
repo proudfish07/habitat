@@ -160,24 +160,21 @@
 
 
 
-    function HabitRow({ habit, todayDone, countInPeriod=0, streakDelta=1, onToggle, onRename, onRemove }){
+    function HabitRow({ habit, todayDone, countInPeriod=0, onToggle, onRename, onRemove, streakDelta=1 }){
       const name = sanitizeText(habit?.name, "");
       const inc = Math.max(1, sanitizeNumber(habit?.value, 1));
-      const thisAdd = inc * Math.max(1, sanitizeNumber(streakDelta, 1));
+      const thisAdd = inc * streakDelta; // ← 當次實際加多少（含連續加成）
     
       return (
         <div className="flex items-center justify-between gap-2 py-2">
           <div className="flex items-center gap-2">
             <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: habit?.color || "#9aa5b1" }} />
-            <EditableText value={name} onChange={newName=>onRename({ ...habit, name: newName })} />
-            <span className="text-xs text-neutral-500">＋{thisAdd} 點</span>
+            <EditableText value={name} onChange={(newName)=>onRename({ ...habit, name: newName })} />
+            <span className="text-xs text-neutral-500">＋{thisAdd}</span> {/* ← 拿掉 「點」 */}
             <span className="text-xs text-neutral-500">（本期 {countInPeriod} 次）</span>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={onToggle}
-              className={`px-3 py-1 rounded-xl ${todayDone ? "bg-neutral-300 text-black" : "bg-black text-white"}`}
-            >
+            <button onClick={onToggle} className={`px-3 py-1 rounded-xl ${todayDone ? "bg-neutral-300 text-black" : "bg-black text-white"}`}>
               達成
             </button>
             <button onClick={onRemove} title="刪除習慣" className="p-1 text-neutral-400 hover:text-black"><IconTrash/></button>
@@ -185,6 +182,7 @@
         </div>
       );
     }
+
 
 
 
@@ -297,25 +295,22 @@
 
       const removeHabit = (id) => setReward({ habits: (reward.habits||[]).filter(h=>h.id!==id), events: (reward.events||[]).filter(e=>e.habitId!==id) });
 
-      function computeStreakDelta(habitId) { // 曆日模式：往回數連續天數
+      function computeStreakDelta(habitId){
         let streak = 0;
         const evs = reward.events || [];
         const hasEventOn = (key) => evs.some(e => e.habitId === habitId && e.date === key);
       
-        // 從昨天開始一路往回，直到遇到沒有打卡的那天
         let d = new Date(today);
-        d.setDate(d.getDate() - 1);
-        while (true) {
+        d.setDate(d.getDate() - 1); // 從昨天往回找
+        while(true){
           const key = localDateKey(d);
-          if (!hasEventOn(key)) break;
+          if(!hasEventOn(key)) break;
           streak += 1;
           d.setDate(d.getDate() - 1);
         }
-      
-        const next = streak + 1; // 今天的加分 = 連續天數 + 1
-        const streakMax = (reward.habits || []).find(h => h.id === habitId)?.streakMax || 30;
-        return Math.min(next, streakMax);
+        return streak + 1; // 今天的加成倍數
       }
+
 
       const toggleHabitToday = (habit) => {
         const idx = (reward.events||[]).findIndex(e => e.habitId===habit.id && e.date===today);
@@ -390,9 +385,10 @@
           <SegmentedBar blocks={blocks} target={reward.target} />
           <div className="flex items-center justify-between text-sm text-neutral-700 flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <span className="font-mono">{total} / <EditableNumber value={reward.target} onChange={(target)=>setReward({ target })} min={1} /> 點</span>
+              <span className="font-mono">{total} / <EditableNumber value={reward.target} onChange={(target)=>setReward({ target })} min={1} /></span>
               <span>；</span>
-              <span>期間（天）<EditableNumber value={reward.periodDays} onChange={(periodDays)=>setReward({ periodDays })} min={1} /></span>
+              <span>期間 <EditableNumber value={reward.periodDays} onChange={(periodDays)=>setReward({ periodDays })} min={1} /> 天</span>
+
               {achieved && (
                 <button onClick={redeem} className="ml-2 px-2 py-1 rounded-md border border-neutral-700 text-neutral-800 bg-white hover:bg-neutral-100">兌換</button>
               )}
@@ -410,13 +406,14 @@
                 key={h.id}
                 habit={h}
                 todayDone={!!todayMap.get(h.id)}
-                countInPeriod={countsMap.get(h.id)||0}
-                streakDelta={computeStreakDelta(h.id)}
+                countInPeriod={countsMap.get(h.id) || 0}
+                streakDelta={computeStreakDelta(h.id)}  // ← 傳入當日連續倍率
                 onToggle={()=>toggleHabitToday(h)}
                 onRename={(next)=>renameHabit(h.id, next)}
                 onRemove={()=>removeHabit(h.id)}
               />
             ))}
+
 
             <NewHabitRow onAdd={addHabit} />
           </div>
