@@ -2,6 +2,8 @@
 
 一個零後端、可離線使用的習慣與獎勵追蹤器。單一 index.html 檔即可運行，資料存在瀏覽器 localStorage。
 
+網址:https://proudfish07.github.io/habitat/
+
 ## 功能總覽
 
 - 獎勵卡（Reward）：設定目標點數、起始日、週期天數，顯示區間進度條與本期事件色塊。
