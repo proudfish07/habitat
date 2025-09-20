@@ -135,23 +135,27 @@
     function NewHabitRow({ onAdd }){
       const [name, setName] = useState("");
       const [value, setValue] = useState("1");
+      const [mode,  setMode]  = useState("count"); // 新增：count / streak
     
       const add = ()=>{
         const nm = name.trim();
-        const v = Math.max(1, Number(value||1));
-        if(!nm) return;
-        onAdd?.(nm, v);
-        setName(""); setValue("1");
+        const v  = Math.max(1, Number(value||1));
+        if (!nm) return;
+        onAdd?.(nm, mode, v);       // 帶出 type
+        setName(""); setValue("1"); setMode("count");
       };
     
       return (
         <div className="flex gap-2 items-center">
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="新增小習慣" className="flex-1 rounded-xl border p-2"/>
+          <select value={mode} onChange={e=>setMode(e.target.value)} className="rounded-xl border p-2 text-sm">
+            <option value="count">計次</option>
+            <option value="streak">累計</option>
+          </select>
           <div className="flex items-center gap-1">
             <span className="text-xs text-neutral-500">加多少</span>
             <input className="w-16 rounded-xl border p-2 text-right text-sm" inputMode="numeric" pattern="[0-9]*"
                    value={value} onChange={e=>setValue(e.target.value.replace(/[^0-9]/g, ""))}/>
-            <span className="text-xs text-neutral-500">點</span>
           </div>
           <button onClick={add} className="px-3 py-2 rounded-xl bg-black text-white"><IconPlus/></button>
         </div>
@@ -160,21 +164,20 @@
 
 
 
-    function HabitRow({ habit, todayDone, countInPeriod=0, onToggle, onRename, onRemove, streakDelta=1 }){
+
+    function HabitRow({ habit, todayDone, countInPeriod=0, thisAdd=1, onToggle, onRename, onRemove }){
       const name = sanitizeText(habit?.name, "");
-      const inc = Math.max(1, sanitizeNumber(habit?.value, 1));
-      const thisAdd = inc * streakDelta; // ← 當次實際加多少（含連續加成）
-    
       return (
         <div className="flex items-center justify-between gap-2 py-2">
           <div className="flex items-center gap-2">
             <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: habit?.color || "#9aa5b1" }} />
-            <EditableText value={name} onChange={(newName)=>onRename({ ...habit, name: newName })} />
-            <span className="text-xs text-neutral-500">＋{thisAdd}</span> {/* ← 拿掉 「點」 */}
+            <EditableText value={name} onChange={newName=>onRename({ ...habit, name: newName })} />
+            {habit?.type === "streak" && <span className="text-[11px] px-1 py-0.5 rounded bg-neutral-200 text-neutral-700">累計</span>}
+            <span className="text-xs text-neutral-500">＋{thisAdd}</span>
             <span className="text-xs text-neutral-500">（本期 {countInPeriod} 次）</span>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={onToggle} className={`px-3 py-1 rounded-xl ${todayDone ? "bg-neutral-300 text-black" : "bg-black text-white"}`}>
+            <button onClick={onToggle} className={`px-3 py-1 rounded-xl ${todayDone?"bg-neutral-300 text-black":"bg-black text-white"}`}>
               達成
             </button>
             <button onClick={onRemove} title="刪除習慣" className="p-1 text-neutral-400 hover:text-black"><IconTrash/></button>
@@ -274,15 +277,19 @@
 
       // ---- Habits ----
       const nextColor = (used) => PALETTE[(used % PALETTE.length)];
-      const addHabit = (name, value=1) => {
+      // 之前：const addHabit = (name, value=1) => { ... }
+      const addHabit = (name, type="count", value=1) => {
         const newHabit = {
           id: uid(),
           name,
+          type,                                  // 新增
           color: nextColor((reward.habits||[]).length),
-          value: Math.max(1, Number(value||1))
+          value: Math.max(1, Number(value||1)),
+          streakMax: 30,
         };
         setReward({ habits: [ ...(reward.habits||[]), newHabit ] });
       };
+
 
 
       const renameHabit = (id, next) => setReward({
@@ -308,7 +315,10 @@
           streak += 1;
           d.setDate(d.getDate() - 1);
         }
-        return streak + 1; // 今天的加成倍數
+      
+        // 依該 habit 的 streakMax 限制加成倍數（預設 30）
+        const cap = (reward.habits || []).find(h => h.id === habitId)?.streakMax ?? 30;
+        return Math.min(streak + 1, cap);
       }
 
 
@@ -319,19 +329,14 @@
           setReward({ events });
         } else {
           const inc = Math.max(1, sanitizeNumber(habit.value, 1));
-          const delta = inc * computeStreakDelta(habit.id);
-
-          
+          const mult = habit.type === "streak" ? computeStreakDelta(habit.id) : 1; // ★ 只有累計吃連續加成
+          const delta = inc * mult;
+      
           const ev = { id: uid(), rewardId: reward.id, habitId: habit.id, date: today, ts: Date.now(), delta, color: habit.color };
-
           setReward({ events: [ ...(reward.events||[]), ev ] });
         }
       };
 
-      function nextHabitDelta(h) {
-        const inc = Math.max(1, sanitizeNumber(h.value, 1));
-        return h.type === 'count' ? inc : computeStreakDelta(h.id) * inc;
-      }
 
       // ---- Penalties ----
       const addPenaltyEvent = (p)=>{
@@ -401,18 +406,22 @@
 
           {/* 小習慣清單 */}
           <div className="border-t pt-2">
-            {(reward.habits||[]).map(h => (
-              <HabitRow
-                key={h.id}
-                habit={h}
-                todayDone={!!todayMap.get(h.id)}
-                countInPeriod={countsMap.get(h.id) || 0}
-                streakDelta={computeStreakDelta(h.id)}  // ← 傳入當日連續倍率
-                onToggle={()=>toggleHabitToday(h)}
-                onRename={(next)=>renameHabit(h.id, next)}
-                onRemove={()=>removeHabit(h.id)}
-              />
-            ))}
+            {(reward.habits||[]).map(h => {
+              const mult = h.type === "streak" ? computeStreakDelta(h.id) : 1;
+              return (
+                <HabitRow
+                  key={h.id}
+                  habit={h}
+                  todayDone={!!todayMap.get(h.id)}
+                  countInPeriod={countsMap.get(h.id)||0}
+                  thisAdd={Math.max(1, sanitizeNumber(h.value,1)) * mult}   // 本次會加多少
+                  onToggle={()=>toggleHabitToday(h)}
+                  onRename={(next)=>renameHabit(h.id, next)}
+                  onRemove={()=>removeHabit(h.id)}
+                />
+              );
+            })}
+
 
 
             <NewHabitRow onAdd={addHabit} />
