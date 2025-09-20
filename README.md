@@ -42,11 +42,11 @@ PWA：可安裝至手機/桌面，連線中斷仍可使用（service-worker.js�
 
 value：新增時輸入（預設 1）。
 
-type = "count"：
+type = "計次"：
 
 本次加分 = value。
 
-type = "streak"：
+type = "累計"：
 
 本次加分 = value * computeStreakDelta(habitId)。
 
