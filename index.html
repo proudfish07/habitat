@@ -157,8 +157,16 @@
         <div className="flex items-center justify-between gap-2 py-2">
           <div className="flex items-center gap-2">
             <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: habit?.color || "#9aa5b1" }} />
-            <EditableText value={name} onChange={onRename} />
+            <EditableText value={name} onChange={(newName)=>onRename({ ...habit, name: newName })} />
             <span className="text-xs text-neutral-500">{habit?.type === 'count' ? '計次' : `累計≤${sanitizeNumber(habit?.streakMax,30)}`}</span>
+          
+            <span className="text-xs text-neutral-500 ml-2">每次 +</span>
+            <EditableNumber
+              value={sanitizeNumber(habit?.value, 1)}
+              onChange={(v)=> onRename({ ...habit, value: v })}
+              min={1}
+            />
+            <span className="text-xs text-neutral-500">點</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-neutral-600 min-w-[48px] text-right">{count} 次</span>
@@ -215,7 +223,13 @@
     function RewardCard({ reward, onChange, onRemove }) {
       const today = todayKey();
       const startDate = reward.startDate;
-      const endDate = useMemo(()=>{ const d=new Date(startDate); d.setDate(d.getDate()+reward.periodDays-1); return localDateKey(d); },[startDate,reward.periodDays]);
+      const endDate = useMemo(() => {
+        const days = Number.isFinite(reward.periodDays) ? reward.periodDays : 30;
+        const d = new Date(startDate);
+        d.setDate(d.getDate() + days - 1);
+        return localDateKey(d);
+      }, [startDate, reward.periodDays]);
+
       const inPeriod = (d) => d >= startDate && d <= endDate;
 
       const eventsInPeriod = useMemo(()=> (reward.events||[]).filter(e=>inPeriod(e.date)).sort((a,b)=>a.ts-b.ts), [reward.events, startDate, endDate]);
@@ -239,28 +253,59 @@
       // ---- Habits ----
       const nextColor = (used) => PALETTE[(used % PALETTE.length)];
       const addHabit = (name, type) => {
-        const newHabit = { id: uid(), name, type, color: nextColor((reward.habits||[]).length), streakMax: 30 };
+        const newHabit = {
+          id: uid(),
+          name,
+          type,
+          color: nextColor((reward.habits||[]).length),
+          streakMax: 30,
+          value: 1,              // << 新增：預設每次 +1，可自行改
+        };
         setReward({ habits: [...(reward.habits||[]), newHabit] });
       };
-      const renameHabit = (id, name) => setReward({ habits: (reward.habits||[]).map(h => h.id===id ? { ...h, name } : h) });
+      const renameHabit = (id, next) => setReward({
+        habits: (reward.habits||[]).map(h => {
+          if (h.id !== id) return h;
+          if (typeof next === 'string') return { ...h, name: next };
+          return { ...h, ...next }; // 例如 { value: 2 }
+        })
+      });
+
       const removeHabit = (id) => setReward({ habits: (reward.habits||[]).filter(h=>h.id!==id), events: (reward.events||[]).filter(e=>e.habitId!==id) });
 
-      function computeStreakDelta(habitId) { // 曆日模式
-        const y = new Date(today); y.setDate(y.getDate()-1); const yKey = localDateKey(y);
-        const hadYesterday = (reward.events||[]).some(e => e.habitId===habitId && e.date===yKey);
-        const prevVal = hadYesterday ? (reward.events||[]).filter(e=>e.habitId===habitId && e.date===yKey).length : 0; // 每天最多一筆
-        const next = prevVal + 1;
-        const streakMax = (reward.habits||[]).find(h=>h.id===habitId)?.streakMax || 30;
+      function computeStreakDelta(habitId) { // 曆日模式：往回數連續天數
+        let streak = 0;
+        const evs = reward.events || [];
+        const hasEventOn = (key) => evs.some(e => e.habitId === habitId && e.date === key);
+      
+        // 從昨天開始一路往回，直到遇到沒有打卡的那天
+        let d = new Date(today);
+        d.setDate(d.getDate() - 1);
+        while (true) {
+          const key = localDateKey(d);
+          if (!hasEventOn(key)) break;
+          streak += 1;
+          d.setDate(d.getDate() - 1);
+        }
+      
+        const next = streak + 1; // 今天的加分 = 連續天數 + 1
+        const streakMax = (reward.habits || []).find(h => h.id === habitId)?.streakMax || 30;
         return Math.min(next, streakMax);
       }
+
       const toggleHabitToday = (habit) => {
         const idx = (reward.events||[]).findIndex(e => e.habitId===habit.id && e.date===today);
         if (idx >= 0) {
           const events = (reward.events||[]).filter((_,i)=>i!==idx);
           setReward({ events });
         } else {
-          const delta = habit.type === 'count' ? 1 : computeStreakDelta(habit.id);
+          const inc = Math.max(1, sanitizeNumber(habit.value, 1));
+          const delta = habit.type === 'count'
+            ? inc
+            : computeStreakDelta(habit.id) * inc;
+          
           const ev = { id: uid(), rewardId: reward.id, habitId: habit.id, date: today, ts: Date.now(), delta, color: habit.color };
+
           setReward({ events: [ ...(reward.events||[]), ev ] });
         }
       };
@@ -302,17 +347,23 @@
           </div>
 
           {/* 期間 & 進度 */}
-          <div className="flex items-center justify-between text-xs text-neutral-600">
-            <span>{startDate} ～ {endDate}</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e)=> setReward({ startDate: e.target.value })}
+              className="border rounded-md px-2 py-1 text-sm"
+            />
+            <span className="text-neutral-500">～ {endDate}</span>
           </div>
           <SegmentedBar blocks={blocks} target={reward.target} />
           <div className="flex items-center justify-between text-sm text-neutral-700 flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <span className="font-mono">{total} / <EditableNumber value={reward.target} onChange={(target)=>setReward({ target })} min={1} /></span>
-              {achieved && (<>
-                <span className="px-2 py-0.5 rounded-full bg-neutral-900 text-white text-xs">🎁 已達成</span>
-                <button onClick={redeem} className="px-2 py-1 rounded-md border border-neutral-700 text-neutral-800 bg-white hover:bg-neutral-100">兌換</button>
-              </>)}
+            <div className="flex items-center gap-3">
+              <span className="font-mono">
+                {total} / <EditableNumber value={reward.target} onChange={(target)=>setReward({ target })} min={1} />
+              </span>
+              <span className="text-xs text-neutral-500">期間（天）</span>
+              <EditableNumber value={reward.periodDays} onChange={(periodDays)=>setReward({ periodDays })} min={1} />
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-neutral-500">新開一期</span>
@@ -328,7 +379,7 @@
                 inRangeCount={countsMap.get(h.id)||0}
                 todayDone={!!todayMap.get(h.id)}
                 onToggle={()=>toggleHabitToday(h)}
-                onRename={(name)=>renameHabit(h.id,name)}
+                onRename={(next)=>renameHabit(h.id, next)}
                 onRemove={()=>removeHabit(h.id)}
               />
             ))}
