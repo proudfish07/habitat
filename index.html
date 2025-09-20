@@ -150,7 +150,7 @@
       );
     }
 
-    function HabitRow({ habit, inRangeCount, todayDone, onToggle, onRename, onRemove }) {
+    function HabitRow({ habit, inRangeCount, todayDone, nextDelta = 1, onToggle, onRename, onRemove }) {
       const name = sanitizeText(habit?.name, "");
       const count = sanitizeNumber(inRangeCount, 0);
       return (
@@ -223,13 +223,6 @@
     }
 
     // ========== Reward Card ==========
-
-
-    
-    function nextHabitDelta(h) {
-      const inc = Math.max(1, sanitizeNumber(h.value, 1));
-      return h.type === 'count' ? inc : computeStreakDelta(h.id) * inc;
-    }
 
 
     
@@ -332,6 +325,11 @@
           setReward({ events: [ ...(reward.events||[]), ev ] });
         }
       };
+
+      function nextHabitDelta(h) {
+        const inc = Math.max(1, sanitizeNumber(h.value, 1));
+        return h.type === 'count' ? inc : computeStreakDelta(h.id) * inc;
+      }
 
       // ---- Penalties ----
       const addPenaltyEvent = (p) => {
