@@ -8,7 +8,7 @@ import {
   todayKey, addDays, parseKey, keyOf, weekStartOf, daysInMonth, uid,
   PALETTE, PENALTY_COLOR, STREAK_CAP, LS_KEY_PREV,
   loadState, saveState, parseImport, buildIndex, isDone, previewPoints, checkPoints,
-  habitStats, rewardTotals, rewardEnd, newReward, newHabit, streakEndingAt,
+  habitStats, rewardTotals, rewardEnd, newReward, newHabit, streakEndingAt, reminderDue,
 } from "./lib.js";
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
@@ -16,6 +16,17 @@ const weekdayLabels = (ws) => [...Array(7)].map((_, i) => WEEKDAYS[(ws + i) % 7]
 const fmtMD = (k) => { const d = parseKey(k); return `${d.getMonth() + 1}/${d.getDate()}`; };
 const fmtFull = (k) => { const d = parseKey(k); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`; };
 const pct = (x) => `${Math.round(x * 100)}%`;
+// 系統通知（有授權才會跳）；手機上要透過 service worker 才能顯示
+const canNotify = () => typeof Notification !== "undefined";
+async function showReminder(body) {
+  if (!canNotify() || Notification.permission !== "granted") return;
+  const opts = { body, icon: "./icons/icon-192.png", badge: "./icons/icon-192.png", tag: "habit-reminder" };
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) return await reg.showNotification("該打卡囉", opts);
+  } catch (e) { /* 改用下面的方式 */ }
+  try { new Notification("該打卡囉", opts); } catch (e) { /* 這個瀏覽器不支援 */ }
+}
 const stamp = () => { const d = new Date(); const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; };
 
 // ---------- 小圖示 ----------
@@ -57,6 +68,26 @@ function App() {
   const idx = useMemo(() => buildIndex(state), [state]);
   const activeHabits = state.habits.filter((h) => !h.archived);
   const update = (fn) => setState((s) => fn(s));
+
+  // 打卡提醒：每 30 秒檢查一次；時間到、今天還有沒打卡的習慣就提醒（一天一次）
+  const pending = activeHabits.filter((h) => !isDone(idx, h.id, today));
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  useEffect(() => {
+    const check = () => {
+      const now = new Date();
+      const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      const left = pendingRef.current;
+      if (!reminderDue(state.settings, today, hhmm, left.length)) return;
+      update((s) => ({ ...s, settings: { ...s.settings, reminderLast: today } }));
+      const body = `還有 ${left.length} 個習慣沒打卡：${left.map((h) => h.name).join("、")}`;
+      setNotice(`⏰ ${body}`);
+      showReminder(body);
+    };
+    check();
+    const t = setInterval(check, 30000);
+    return () => clearInterval(t);
+  }, [state.settings.reminderTime, state.settings.reminderLast, today]);
 
   // ---------- 動作 ----------
   const actions = {
@@ -183,7 +214,7 @@ function TodayView({ state, idx, today, actions, activeHabits, editHabit }) {
             const done = isDone(idx, h.id, today);
             const st = habitStats(h, idx, today, ws);
             return (
-              <li key={h.id} className={`habit ${done ? "done" : ""}`}>
+              <SwipeRow key={h.id} className={`habit ${done ? "done" : ""}`} onEdit={() => editHabit(h)} onDelete={() => actions.deleteHabit(h)}>
                 <button className="checkbtn" style={{ "--c": h.color }} onClick={() => actions.toggleCheck(h.id, today)} aria-pressed={done} aria-label={`${h.name}：${done ? "已完成，點一下取消" : "標記完成"}`}>
                   {done && I.check}
                 </button>
@@ -195,10 +226,11 @@ function TodayView({ state, idx, today, actions, activeHabits, editHabit }) {
                     {state.settings.rewardsEnabled && <span>＋{previewPoints(h, idx, today)}{h.type === "streak" ? "（累計）" : ""}</span>}
                   </div>
                 </div>
-              </li>
+              </SwipeRow>
             );
           })}
         </ul>
+        {activeHabits.length > 0 && <p className="muted small hint">← 左滑刪除　右滑編輯 →</p>}
         {activeHabits.length > 0 && <button className="ghost small" onClick={() => editHabit({})}>{I.plus} 新增習慣</button>}
       </section>
 
@@ -206,6 +238,67 @@ function TodayView({ state, idx, today, actions, activeHabits, editHabit }) {
 
       {state.settings.rewardsEnabled && state.rewards.map((r) => <RewardMini key={r.id} state={state} idx={idx} r={r} today={today} />)}
     </>
+  );
+}
+
+// 左右滑動的清單列：往右滑過門檻 → 編輯，往左滑過門檻 → 刪除（刪除仍會再確認一次）
+const SWIPE_TRIGGER = 90; // px
+function SwipeRow({ className, onEdit, onDelete, children }) {
+  const [dx, setDx] = useState(0);
+  const [anim, setAnim] = useState(false);
+  const g = useRef(null); // 進行中的手勢：{ x, y, id, horiz }
+  const swiped = useRef(false);
+
+  const down = (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    g.current = { x: e.clientX, y: e.clientY, id: e.pointerId, horiz: null };
+    swiped.current = false;
+    setAnim(false);
+  };
+  const move = (e) => {
+    const s = g.current;
+    if (!s || s.id !== e.pointerId) return;
+    const mx = e.clientX - s.x, my = e.clientY - s.y;
+    if (s.horiz === null) {
+      if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+      s.horiz = Math.abs(mx) > Math.abs(my); // 先判斷方向，垂直的話交給頁面捲動
+      if (s.horiz) try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* 沒抓到也能滑 */ }
+    }
+    if (!s.horiz) return;
+    swiped.current = true;
+    const lim = SWIPE_TRIGGER * 1.6; // 超過門檻後加阻尼
+    setDx(Math.abs(mx) > lim ? Math.sign(mx) * (lim + (Math.abs(mx) - lim) * 0.25) : mx);
+  };
+  const up = (e) => {
+    const s = g.current;
+    g.current = null;
+    if (!s || !s.horiz) return;
+    setAnim(true);
+    setDx(0);
+    if (e.type === "pointercancel") return; // 被系統打斷（例如來電、捲動接手）就只回位
+    if (dx >= SWIPE_TRIGGER) onEdit?.();
+    else if (dx <= -SWIPE_TRIGGER) setTimeout(() => onDelete?.(), 180); // 等列回位再跳確認框
+  };
+  // 滑動結束時吃掉那一下 click，避免順便打卡
+  const eatClick = (e) => { if (swiped.current) { e.stopPropagation(); e.preventDefault(); swiped.current = false; } };
+
+  const side = dx > 0 ? "edit" : dx < 0 ? "del" : "";
+  const armed = Math.abs(dx) >= SWIPE_TRIGGER;
+  return (
+    <li className={`swipe ${side} ${armed ? "armed" : ""}`}>
+      <div className="swipe-bg" aria-hidden="true">
+        <span className="swipe-edit">{I.edit} 編輯</span>
+        <span className="swipe-del">刪除 {I.x}</span>
+      </div>
+      <div
+        className={`${className} swipe-fg ${anim ? "anim" : ""}`}
+        style={{ transform: dx ? `translateX(${dx}px)` : undefined }}
+        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+        onClickCapture={eatClick}
+      >
+        {children}
+      </div>
+    </li>
   );
 }
 
@@ -752,6 +845,8 @@ function SettingsView({ state, today, actions, editHabit }) {
         )}
       </section>
 
+      <ReminderCard state={state} actions={actions} />
+
       <section className="card">
         <label className="row between">
           <b>每週從哪天開始</b>
@@ -772,6 +867,39 @@ function SettingsView({ state, today, actions, editHabit }) {
       </section>
       <p className="muted small center">Habit Hourglass v2.0.0</p>
     </>
+  );
+}
+
+function ReminderCard({ state, actions }) {
+  const time = state.settings.reminderTime;
+  const [perm, setPerm] = useState(canNotify() ? Notification.permission : "unsupported");
+  const askPerm = async () => {
+    if (!canNotify()) return;
+    try { setPerm(await Notification.requestPermission()); } catch (e) { /* 舊版 Safari 不回傳 Promise */ }
+  };
+  const toggle = (on) => {
+    actions.setSettings({ reminderTime: on ? (time || "21:00") : "", reminderLast: "" });
+    if (on && perm === "default") askPerm();
+  };
+  return (
+    <section className="card">
+      <label className="row between">
+        <span><b>打卡提醒</b><br /><span className="muted small">到了設定的時間，如果還有習慣沒打卡就提醒你</span></span>
+        <input type="checkbox" className="switch" checked={!!time} onChange={(e) => toggle(e.target.checked)} />
+      </label>
+      {time && (
+        <>
+          <label className="row between">
+            <span>提醒時間</span>
+            <input type="time" value={time} onChange={(e) => e.target.value && actions.setSettings({ reminderTime: e.target.value, reminderLast: "" })} />
+          </label>
+          {perm === "default" && <button className="ghost small" onClick={askPerm}>允許顯示通知</button>}
+          {perm === "denied" && <p className="muted small">通知權限被封鎖了，只會在 App 裡顯示提示。可以到瀏覽器的網站設定重新允許。</p>}
+          {perm === "unsupported" && <p className="muted small">這個瀏覽器不支援通知，只會在 App 裡顯示提示。iPhone 需要先「加入主畫面」再從主畫面開啟。</p>}
+          <p className="muted small">⚠️ App 要開著（或在背景沒被關掉）才會提醒；如果錯過時間，下次打開 App 時會補提醒一次。</p>
+        </>
+      )}
+    </section>
   );
 }
 

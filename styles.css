@@ -112,6 +112,22 @@ h3 { font-family: var(--serif); font-weight: 600; font-size: 14px; letter-spacin
 .checkbtn { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--c) 75%, transparent); background: color-mix(in srgb, var(--c) 8%, transparent); display: grid; place-items: center; color: #fff; transition: background .35s ease, box-shadow .35s ease, transform .2s; }
 .habit:hover .checkbtn { box-shadow: 0 0 0 5px color-mix(in srgb, var(--c) 14%, transparent); }
 .habit.done .checkbtn { background: var(--c); border-color: var(--c); box-shadow: 0 4px 12px -6px var(--c); }
+/* 左右滑動列：右滑編輯（松綠）、左滑刪除（朱） */
+.swipe { position: relative; border-top: 1px dashed var(--line); border-radius: 16px; overflow: hidden; }
+.swipe:first-child { border-top: 0; }
+.swipe > .habit { border-top: 0; }
+.swipe-fg { position: relative; touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+.swipe-fg.anim { transition: transform .22s ease, background .25s; }
+.swipe.edit .swipe-fg, .swipe.del .swipe-fg { background: var(--card-solid); }
+.swipe-bg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; font-size: 14px; font-weight: 600; opacity: 0; transition: background .2s, color .2s; }
+.swipe-bg span { display: inline-flex; align-items: center; gap: 6px; }
+.swipe.edit .swipe-bg, .swipe.del .swipe-bg { opacity: 1; }
+.swipe.edit .swipe-bg { background: color-mix(in srgb, var(--accent) 16%, var(--card-solid)); color: var(--accent); }
+.swipe.del .swipe-bg { background: color-mix(in srgb, var(--danger) 16%, var(--card-solid)); color: var(--danger); }
+.swipe.edit .swipe-del, .swipe.del .swipe-edit { visibility: hidden; }
+.swipe.edit.armed .swipe-bg { background: var(--accent); color: var(--accent-ink); }
+.swipe.del.armed .swipe-bg { background: var(--danger); color: #fff; }
+
 .tag { font-size: 11px; background: var(--soft); border-radius: 999px; padding: 1px 8px; margin-left: 6px; font-weight: 400; }
 
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }

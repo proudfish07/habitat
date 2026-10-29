@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import {
   addDays, diffDays, weekStartOf, migrateV1, normalizeState, buildIndex, checkPoints, previewPoints,
-  habitStats, rewardTotals, parseImport, loadState, LS_KEY, LS_KEY_V1,
+  habitStats, rewardTotals, parseImport, loadState, reminderDue, LS_KEY, LS_KEY_V1,
 } from "../src/lib.js";
 
 let passed = 0;
@@ -133,6 +133,17 @@ test("預設純打卡模式：新使用者與舊版轉換都關閉點數，已�
   assert.equal(normalizeState(null, TODAY).settings.rewardsEnabled, false);
   assert.equal(migrateV1(v1, TODAY).state.settings.rewardsEnabled, false);
   assert.equal(normalizeState({ version: 2, settings: { rewardsEnabled: true } }, TODAY).settings.rewardsEnabled, true);
+});
+
+test("打卡提醒：時間到、今天沒提醒過、還有沒打卡的才提醒；壞掉的時間會被清掉", () => {
+  const st = normalizeState({ version: 2, settings: { reminderTime: "21:00" } }, TODAY).settings;
+  assert.equal(st.reminderTime, "21:00");
+  assert.equal(reminderDue(st, TODAY, "20:59", 2), false);
+  assert.equal(reminderDue(st, TODAY, "21:00", 2), true);
+  assert.equal(reminderDue(st, TODAY, "23:10", 0), false);
+  assert.equal(reminderDue({ ...st, reminderLast: TODAY }, TODAY, "21:30", 2), false);
+  assert.equal(reminderDue({ ...st, reminderTime: "" }, TODAY, "21:30", 2), false);
+  assert.equal(normalizeState({ version: 2, settings: { reminderTime: "25:99" } }, TODAY).settings.reminderTime, "");
 });
 
 console.log(`\n全部 ${passed} 項通過`);

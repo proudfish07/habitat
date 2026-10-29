@@ -11,6 +11,7 @@ export const parseKey = (k) => {
   return new Date(y, m - 1, d);
 };
 export const isDateKey = (k) => typeof k === "string" && /^\d{4}-\d{2}-\d{2}$/.test(k) && !isNaN(parseKey(k));
+const isTime = (t) => typeof t === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(t); // "HH:MM"
 export const todayKey = () => keyOf(new Date());
 export const addDays = (k, n) => {
   const d = parseKey(k);
@@ -51,7 +52,7 @@ export function defaultState(today = todayKey()) {
     ],
     penaltyLogs: [],
     rewards: [newReward(today)],
-    settings: { rewardsEnabled: false, weekStart: 1 }, // 預設純打卡模式；點數可在設定中開啟
+    settings: { rewardsEnabled: false, weekStart: 1, reminderTime: "", reminderLast: "" }, // 預設純打卡模式；點數可在設定中開啟
   };
 }
 
@@ -139,8 +140,18 @@ export function normalizeState(s, today = todayKey()) {
     })),
   }));
   const st = s.settings || {};
-  out.settings = { rewardsEnabled: st.rewardsEnabled === true, weekStart: st.weekStart === 0 ? 0 : 1 };
+  out.settings = {
+    rewardsEnabled: st.rewardsEnabled === true, weekStart: st.weekStart === 0 ? 0 : 1,
+    reminderTime: isTime(st.reminderTime) ? st.reminderTime : "", // "" = 關閉
+    reminderLast: isDateKey(st.reminderLast) ? st.reminderLast : "", // 最後一次提醒的日期，一天只提醒一次
+  };
   return out;
+}
+
+// ---------- 打卡提醒（App 開著時才會觸發） ----------
+// 現在是否該提醒：已設定時間、今天還沒提醒過、時間已到、還有沒打卡的習慣
+export function reminderDue(settings, today, nowHHMM, pendingCount) {
+  return !!settings.reminderTime && settings.reminderLast !== today && nowHHMM >= settings.reminderTime && pendingCount > 0;
 }
 
 // ---------- 從舊版 habit_rewards_v1 遷移 ----------

@@ -1,6 +1,6 @@
 // Habit Hourglass service worker
 // CACHE_NAME 由 build.mjs 依檔案內容自動更新；內容一變就換新快取，舊快取會被清掉
-const CACHE_NAME = "habit-hourglass-80cc681068";
+const CACHE_NAME = "habit-hourglass-c92a88d205";
 const ASSETS = [
   "./",
   "./index.html",
@@ -20,6 +20,17 @@ self.addEventListener("activate", (event) => {
     caches.keys()
       .then((keys) => Promise.all(keys.filter((k) => k.startsWith("habit-hourglass-") && k !== CACHE_NAME).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
+  );
+});
+
+// 點打卡提醒通知：切回已開著的 App，沒有就開一個
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const w = list.find((c) => "focus" in c);
+      return w ? w.focus() : self.clients.openWindow("./");
+    })
   );
 });
 
