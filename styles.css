@@ -20,6 +20,27 @@
     color-scheme: dark;
   }
 }
+
+/* 天色隨時間變化：<html data-phase="dawn|day|dusk|night">（由 app.js 每分鐘更新）
+   --sun-x / --sun-y 是太陽或月亮在天上的位置 */
+@property --mist { syntax: "<color>"; inherits: true; initial-value: #f7f4ec; }
+@property --sun { syntax: "<color>"; inherits: true; initial-value: #d9a77a; }
+@property --m1 { syntax: "<color>"; inherits: true; initial-value: #c9cfc4; }
+@property --m2 { syntax: "<color>"; inherits: true; initial-value: #a9b5aa; }
+@property --m3 { syntax: "<color>"; inherits: true; initial-value: #7f9286; }
+:root { --sun-x: 64%; --sun-y: 66%; --sun-r: 30px; --stars: 0; transition: --mist 3s, --sun 3s, --m1 3s, --m2 3s, --m3 3s; }
+:root[data-body="moon"] { --sun-r: 22px; }
+:root[data-phase="dawn"]  { --mist: #e8e2ec; --sun: #eeb48c; --m1: #c9c9d1; --m2: #a6abb6; --m3: #7b8291; }
+:root[data-phase="day"]   { --mist: #f4f2ea; --sun: #e4c07c; }
+:root[data-phase="dusk"]  { --mist: #f1d6c4; --sun: #d77d55; --m1: #cdbcb2; --m2: #a89a95; --m3: #7a706d; }
+:root[data-phase="night"] { --mist: #8f9cb0; --sun: #fbf8ec; --m1: #8a96a7; --m2: #6b7889; --m3: #4c5767; --stars: .8; }
+:root[data-phase="night"] .topbar > span { color: var(--ink); opacity: .7; } /* 夜空較深，日期改深色才看得清楚 */
+@media (prefers-color-scheme: dark) {
+  :root[data-phase="dawn"]  { --mist: #262434; --sun: #c99a7a; --m1: #24242e; --m2: #1d1e26; --m3: #15161c; }
+  :root[data-phase="day"]   { --mist: #1e2524; --sun: #d8bf8c; }
+  :root[data-phase="dusk"]  { --mist: #2c211e; --sun: #c9845f; --m1: #2a2321; --m2: #211c1b; --m3: #171313; }
+  :root[data-phase="night"] { --mist: #10151c; --sun: #e9e3cc; --m1: #1d232b; --m2: #171c23; --m3: #10141a; --stars: .9; }
+}
 * { box-sizing: border-box; }
 html { background: var(--bg); }
 html, body { margin: 0; color: var(--ink); overflow-x: hidden; }
@@ -29,12 +50,22 @@ body { min-height: 100vh; font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "
 body::before {
   content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1;
   background:
-    radial-gradient(circle at 64% 66%, color-mix(in srgb, var(--sun) 70%, transparent) 0 30px, transparent 31px),
-    radial-gradient(circle at 64% 66%, color-mix(in srgb, var(--sun) 18%, transparent) 0 60px, transparent 150px),
-    linear-gradient(to bottom, var(--mist), var(--bg) 55%);
-  opacity: .9;
+    radial-gradient(circle at var(--sun-x) var(--sun-y), color-mix(in srgb, var(--sun) 75%, transparent) 0 var(--sun-r), transparent calc(var(--sun-r) + 1px)),
+    radial-gradient(circle at var(--sun-x) var(--sun-y), color-mix(in srgb, var(--sun) 20%, transparent) 0 calc(var(--sun-r) * 2), transparent calc(var(--sun-r) * 5)),
+    linear-gradient(to bottom, var(--mist), var(--bg) 62%);
+  opacity: .92;
 }
-.app::before, .app::after { content: ""; position: fixed; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: -1; }
+/* 夜晚的星星 */
+body::after {
+  content: ""; position: fixed; inset: 0 0 45% 0; pointer-events: none; z-index: -1; opacity: var(--stars); transition: opacity 3s;
+  --st: rgba(255, 255, 255, .95);
+  background:
+    radial-gradient(1.5px 1.5px at 12% 18%, var(--st), transparent), radial-gradient(1px 1px at 27% 8%, var(--st), transparent),
+    radial-gradient(1.5px 1.5px at 41% 25%, var(--st), transparent), radial-gradient(1px 1px at 56% 12%, var(--st), transparent),
+    radial-gradient(1px 1px at 68% 33%, var(--st), transparent), radial-gradient(1.5px 1.5px at 83% 16%, var(--st), transparent),
+    radial-gradient(1px 1px at 92% 40%, var(--st), transparent), radial-gradient(1px 1px at 7% 45%, var(--st), transparent),
+    radial-gradient(1.5px 1.5px at 33% 52%, var(--st), transparent), radial-gradient(1px 1px at 76% 58%, var(--st), transparent);
+}.app::before, .app::after { content: ""; position: fixed; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: -1; }
 .app::before {
   height: 40vh; min-height: 200px; background: var(--m1);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 300' preserveAspectRatio='none'%3E%3Cpath d='M0 150 C90 110 160 70 260 95 C340 115 390 40 500 30 C600 22 660 100 760 95 C860 90 900 20 1010 35 C1100 47 1160 90 1200 100 V300 H0Z'/%3E%3C/svg%3E") bottom / 100% 100% no-repeat;

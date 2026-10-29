@@ -148,6 +148,19 @@ export function normalizeState(s, today = todayKey()) {
   return out;
 }
 
+// ---------- 背景天色：依時間決定時段和日／月位置 ----------
+// 時段：清晨 5:00–7:30、白天 7:30–16:30、黃昏 16:30–19:00、夜晚其餘
+// 太陽 6:00 從左邊山後升起、18:00 在右邊落下；月亮 18:00–6:00 走同一條弧線
+export function skyAt(d = new Date()) {
+  const h = d.getHours() + d.getMinutes() / 60;
+  const phase = h >= 5 && h < 7.5 ? "dawn" : h >= 7.5 && h < 16.5 ? "day" : h >= 16.5 && h < 19 ? "dusk" : "night";
+  const sun = h >= 6 && h < 18;
+  const p = sun ? (h - 6) / 12 : ((h + 6) % 24) / 12; // 弧線上的進度 0 → 1
+  const x = 12 + 76 * p; // %，左到右
+  const y = 72 - 26 * Math.sin(Math.PI * p); // %，地平線在山後；最高只到畫面中段，才不會整個躲在卡片後面
+  return { phase, body: sun ? "sun" : "moon", x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+}
+
 // ---------- 打卡提醒（App 開著時才會觸發） ----------
 // 現在是否該提醒：已設定時間、今天還沒提醒過、時間已到、還有沒打卡的習慣
 export function reminderDue(settings, today, nowHHMM, pendingCount) {

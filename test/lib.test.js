@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import {
   addDays, diffDays, weekStartOf, migrateV1, normalizeState, buildIndex, checkPoints, previewPoints,
-  habitStats, rewardTotals, parseImport, loadState, reminderDue, LS_KEY, LS_KEY_V1,
+  habitStats, rewardTotals, parseImport, loadState, reminderDue, skyAt, LS_KEY, LS_KEY_V1,
 } from "../src/lib.js";
 
 let passed = 0;
@@ -144,6 +144,19 @@ test("打卡提醒：時間到、今天沒提醒過、還有沒打卡的才提�
   assert.equal(reminderDue({ ...st, reminderLast: TODAY }, TODAY, "21:30", 2), false);
   assert.equal(reminderDue({ ...st, reminderTime: "" }, TODAY, "21:30", 2), false);
   assert.equal(normalizeState({ version: 2, settings: { reminderTime: "25:99" } }, TODAY).settings.reminderTime, "");
+});
+
+test("背景天色：時段切換、正午太陽在最高、午夜月亮在最高", () => {
+  const at = (hh, mm = 0) => skyAt(new Date(2026, 9, 22, hh, mm));
+  assert.equal(at(5, 30).phase, "dawn");
+  assert.equal(at(12).phase, "day");
+  assert.equal(at(17).phase, "dusk");
+  assert.equal(at(23).phase, "night");
+  assert.equal(at(4, 59).phase, "night");
+  assert.deepEqual([at(12).body, at(12).x, at(12).y], ["sun", 50, 46]);
+  assert.deepEqual([at(0).body, at(0).x, at(0).y], ["moon", 50, 46]);
+  assert.equal(at(6).y, 72); // 剛升起，還在山後
+  assert.equal(at(18).body, "moon");
 });
 
 console.log(`\n全部 ${passed} 項通過`);

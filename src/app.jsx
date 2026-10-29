@@ -8,8 +8,26 @@ import {
   todayKey, addDays, parseKey, keyOf, weekStartOf, daysInMonth, uid,
   PALETTE, PENALTY_COLOR, STREAK_CAP, LS_KEY_PREV,
   loadState, saveState, parseImport, buildIndex, isDone, previewPoints, checkPoints,
-  habitStats, rewardTotals, rewardEnd, newReward, newHabit, streakEndingAt, reminderDue,
+  habitStats, rewardTotals, rewardEnd, newReward, newHabit, streakEndingAt, reminderDue, skyAt,
 } from "./lib.js";
+
+// 背景天色跟著時間走：時段寫在 <html data-phase>，日／月位置寫成 CSS 變數
+// 網址加 ?sky=dawn|day|dusk|night 可以固定某個時段（預覽用）
+function applySky() {
+  const s = skyAt();
+  const forced = new URLSearchParams(location.search).get("sky");
+  if (forced) {
+    s.phase = forced;
+    Object.assign(s, { dawn: { body: "sun", x: 18, y: 64 }, day: { body: "sun", x: 62, y: 47 }, dusk: { body: "sun", x: 80, y: 62 }, night: { body: "moon", x: 70, y: 49 } }[forced] || {});
+  }
+  const r = document.documentElement;
+  r.dataset.phase = s.phase;
+  r.dataset.body = s.body;
+  r.style.setProperty("--sun-x", `${s.x}%`);
+  r.style.setProperty("--sun-y", `${s.y}%`);
+}
+applySky();
+setInterval(applySky, 60000);
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 const weekdayLabels = (ws) => [...Array(7)].map((_, i) => WEEKDAYS[(ws + i) % 7]);
