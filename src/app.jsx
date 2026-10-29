@@ -64,7 +64,10 @@ function App() {
       if (date > today) return;
       update((s) => {
         const exists = s.checks.some((c) => c.habitId === habitId && c.date === date);
-        return { ...s, checks: exists ? s.checks.filter((c) => !(c.habitId === habitId && c.date === date)) : [...s.checks, { id: uid(), habitId, date, ts: Date.now() }] };
+        if (exists) return { ...s, checks: s.checks.filter((c) => !(c.habitId === habitId && c.date === date)) };
+        // 補登建立日之前的日子時，建立日跟著往前移，統計才會算到
+        const habits = s.habits.map((h) => (h.id === habitId && date < h.createdAt ? { ...h, createdAt: date } : h));
+        return { ...s, habits, checks: [...s.checks, { id: uid(), habitId, date, ts: Date.now() }] };
       });
     },
     addPenaltyLog(p, date) {

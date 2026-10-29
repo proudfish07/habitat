@@ -114,7 +114,11 @@ export function normalizeState(s, today = todayKey()) {
     if (Number.isFinite(c.points)) o.points = c.points; // 舊版遷移過來的分數，保留原值
     return o;
   });
-  out.penalties = (Array.isArray(s.penalties) ? s.penalties : []).filter((p) => p && p.id).map((p) => ({
+  // 補登了建立日之前的日子 → 建立日往前移，否則本月達成率、連續達標週數會漏算
+  const firstCheck = new Map();
+  for (const c of out.checks) if (!firstCheck.has(c.habitId) || c.date < firstCheck.get(c.habitId)) firstCheck.set(c.habitId, c.date);
+  for (const h of out.habits) { const f = firstCheck.get(h.id); if (f && f < h.createdAt) h.createdAt = f; }
+  out.penalties =(Array.isArray(s.penalties) ? s.penalties : []).filter((p) => p && p.id).map((p) => ({
     id: str(p.id), name: str(p.name, "未命名懲罰"), value: clampInt(p.value, 1, 9999, 1),
   }));
   const penIds = new Set(out.penalties.map((p) => p.id));

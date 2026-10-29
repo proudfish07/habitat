@@ -82,6 +82,19 @@ test("統計：目前連續（今天還沒打不算斷）、最長連續、本�
   assert.equal(st.daysSoFar, 22);
 });
 
+test("補登建立日之前的日子：建立日往前移，本月達成率算得到", () => {
+  const s = normalizeState({
+    version: 2,
+    habits: [{ id: "a", name: "讀書", createdAt: TODAY }],
+    checks: ["2026-10-20", "2026-10-21"].map((d, i) => ({ id: "c" + i, habitId: "a", date: d, ts: i })),
+  }, TODAY);
+  assert.equal(s.habits[0].createdAt, "2026-10-20");
+  const st = habitStats(s.habits[0], buildIndex(s), TODAY, 1);
+  assert.equal(st.current, 2);
+  assert.equal(st.doneThisMonth, 2);
+  assert.equal(st.daysSoFar, 3);
+});
+
 test("同一習慣同一天重複打卡只算一次", () => {
   const s = normalizeState({
     version: 2, habits: [{ id: "a", name: "x" }],
