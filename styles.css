@@ -84,6 +84,8 @@ h3 { font-family: var(--serif); font-weight: 600; font-size: 14px; letter-spacin
 .hint { margin: 4px 0 0; }
 
 .banner { background: #f4ead2; color: #5e4a1e; border-radius: 18px; padding: 11px 14px; font-size: 13px; margin-bottom: 14px; cursor: pointer; }
+.banner { display: flex; align-items: flex-start; gap: 10px; justify-content: space-between; }
+.banner-x { flex: none; opacity: .5; font-size: 16px; line-height: 1.2; }
 .banner.danger { background: #f3e0da; color: #7a2f22; cursor: default; }
 @media (prefers-color-scheme: dark) { .banner { background: #352f22; color: #ecdcb2; } .banner.danger { background: #3a2622; color: #f0bfb5; } }
 

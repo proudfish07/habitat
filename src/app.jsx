@@ -172,7 +172,7 @@ function App() {
         <span className="muted">{fmtFull(today)}</span>
       </header>
       {!saveOk && <div className="banner danger">⚠️ 無法寫入瀏覽器儲存空間（可能是私密瀏覽或空間已滿），這次的變更重新整理後會遺失。請到「設定」匯出備份。</div>}
-      {notice && <div className="banner" onClick={() => setNotice(null)}>{notice}<span className="muted">（點一下關閉）</span></div>}
+      {notice && <div className="banner" onClick={() => setNotice(null)}>{notice}<span className="banner-x" aria-label="關閉">×</span></div>}
 
       <main>
         {tab === "today" && <TodayView {...ctx} />}
@@ -230,7 +230,6 @@ function TodayView({ state, idx, today, actions, activeHabits, editHabit }) {
             );
           })}
         </ul>
-        {activeHabits.length > 0 && <p className="muted small hint">← 左滑刪除　右滑編輯 →</p>}
         {activeHabits.length > 0 && <button className="ghost small" onClick={() => editHabit({})}>{I.plus} 新增習慣</button>}
       </section>
 
@@ -401,7 +400,6 @@ function CalendarView(props) {
         {mode === "week" && <WeekGrid {...props} habits={habit ? [habit] : habits} anchor={anchor} />}
         {mode === "month" && <MonthGrid {...props} habits={habits} habit={habit} anchor={anchor} />}
         {mode === "year" && <YearHeatmap {...props} habits={habits} habit={habit} anchor={anchor} />}
-        <p className="muted small hint">{mode === "week" ? "點格子直接打勾／取消（不能記未來）" : "點某一天可以補登或修改當天紀錄"}</p>
       </section>
     </>
   );
@@ -579,7 +577,6 @@ function YearHeatmap({ state, idx, today, openDay, habits, habit, anchor }) {
         <span>{y} 年有紀錄的天數：{doneDays} / {total}</span>
         <span className="hlegend" style={{ "--c": color }}>少 {[0, 1, 2, 3, 4].map((l) => <i key={l} className={`hc l${l}`} />)} 多</span>
       </div>
-      {!habit && <p className="muted small">顏色深淺 = 當天完成的習慣占全部習慣的比例</p>}
     </div>
   );
 }
@@ -820,7 +817,7 @@ function SettingsView({ state, today, actions, editHabit }) {
 
       <section className="card">
         <label className="row between">
-          <span><b>獎勵／懲罰點數</b><br /><span className="muted small">關閉後只保留打卡和日曆，點數資料不會被刪</span></span>
+          <b>獎勵／懲罰點數</b>
           <input type="checkbox" className="switch" checked={state.settings.rewardsEnabled} onChange={(e) => actions.setSettings({ rewardsEnabled: e.target.checked })} />
         </label>
         {state.settings.rewardsEnabled && (
@@ -840,7 +837,6 @@ function SettingsView({ state, today, actions, editHabit }) {
               <input className="num" inputMode="numeric" value={pVal} onChange={(e) => setPVal(e.target.value.replace(/\D/g, ""))} />
               <button className="primary small" disabled={!pName.trim()} onClick={() => { actions.savePenalty({ id: uid(), name: pName.trim(), value: Math.max(1, Number(pVal) || 1) }); setPName(""); setPVal("1"); }}>{I.plus}</button>
             </div>
-            <p className="muted small">修改懲罰點數只影響之後的紀錄，過去的扣分維持原值。</p>
           </>
         )}
       </section>
@@ -858,14 +854,12 @@ function SettingsView({ state, today, actions, editHabit }) {
 
       <section className="card">
         <h2>備份</h2>
-        <p className="muted small">資料只存在這台裝置的瀏覽器裡。清除瀏覽器資料或換手機就會不見，建議定期匯出。</p>
         <div className="row gap wrap">
           <button className="primary" onClick={exportJson}>匯出 JSON</button>
           <button className="ghost" onClick={() => fileRef.current?.click()}>匯入 JSON</button>
           <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={importJson} />
         </div>
       </section>
-      <p className="muted small center">Habit Hourglass v2.0.0</p>
     </>
   );
 }
@@ -884,7 +878,7 @@ function ReminderCard({ state, actions }) {
   return (
     <section className="card">
       <label className="row between">
-        <span><b>打卡提醒</b><br /><span className="muted small">到了設定的時間，如果還有習慣沒打卡就提醒你</span></span>
+        <b>打卡提醒</b>
         <input type="checkbox" className="switch" checked={!!time} onChange={(e) => toggle(e.target.checked)} />
       </label>
       {time && (
@@ -894,9 +888,8 @@ function ReminderCard({ state, actions }) {
             <input type="time" value={time} onChange={(e) => e.target.value && actions.setSettings({ reminderTime: e.target.value, reminderLast: "" })} />
           </label>
           {perm === "default" && <button className="ghost small" onClick={askPerm}>允許顯示通知</button>}
-          {perm === "denied" && <p className="muted small">通知權限被封鎖了，只會在 App 裡顯示提示。可以到瀏覽器的網站設定重新允許。</p>}
-          {perm === "unsupported" && <p className="muted small">這個瀏覽器不支援通知，只會在 App 裡顯示提示。iPhone 需要先「加入主畫面」再從主畫面開啟。</p>}
-          <p className="muted small">⚠️ App 要開著（或在背景沒被關掉）才會提醒；如果錯過時間，下次打開 App 時會補提醒一次。</p>
+          {perm === "denied" && <p className="muted small">通知已被封鎖</p>}
+          {perm === "unsupported" && <p className="muted small">iPhone 需先加入主畫面才能通知</p>}
         </>
       )}
     </section>
