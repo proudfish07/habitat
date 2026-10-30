@@ -453,10 +453,16 @@ function StatsCard({ state, idx, today, habit, editHabit }) {
       <div className="stats">
         <div><b>{st.current}</b><span>目前連續</span></div>
         <div><b>{st.longest}</b><span>最長連續</span></div>
-        <div><b>{pct(st.monthRate)}</b><span>本月 {st.doneThisMonth}/{st.daysSoFar} 天</span></div>
-        {!isDaily(habit)
-          ? <div><b>{st.thisPeriod}/{habit.goalTimes}</b><span>{periodWord(habit)}・連續達標 {st.periodStreak} {habit.goalWeeks === 1 ? "週" : "期"}{habit.goalWeeks > 1 ? `・剩 ${st.periodLeft} 天` : ""}</span></div>
-          : <div><b>{st.total}</b><span>累計天數</span></div>}
+        {/* 本月達成率以「每天」為基準，只對每天的習慣有意義；其他頻率改顯示累計次數 */}
+        {isDaily(habit)
+          ? <>
+              <div><b>{pct(st.monthRate)}</b><span>本月 {st.doneThisMonth}/{st.daysSoFar} 天</span></div>
+              <div><b>{st.total}</b><span>累計天數</span></div>
+            </>
+          : <>
+              <div><b>{st.thisPeriod}/{habit.goalTimes}</b><span>{periodWord(habit)}・連續達標 {st.periodStreak} {habit.goalWeeks === 1 ? "週" : "期"}{habit.goalWeeks > 1 ? `・剩 ${st.periodLeft} 天` : ""}</span></div>
+              <div><b>{st.total}</b><span>累計次數</span></div>
+            </>}
       </div>
     </section>
   );
