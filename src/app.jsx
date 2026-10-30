@@ -9,6 +9,7 @@ import {
   PALETTE, PENALTY_COLOR, STREAK_CAP, LS_KEY_PREV,
   loadState, saveState, parseImport, buildIndex, isDone, previewPoints, checkPoints,
   habitStats, rewardTotals, rewardEnd, newReward, newHabit, streakEndingAt, reminderDue, skyAt,
+  isDaily, goalLabel, periodWord, periodOf, countInRange, NOTE_MAX,
 } from "./lib.js";
 
 // 背景天色跟著時間走：時段寫在 <html data-phase>，日／月位置寫成 CSS 變數
@@ -74,6 +75,7 @@ function App() {
   const [tab, setTab] = useState("today");
   const [sheetDate, setSheetDate] = useState(null); // 點日曆某天 → 補登
   const [editing, setEditing] = useState(null); // 編輯中的習慣（新增時為 {}）
+  const [noteFor, setNoteFor] = useState(null); // 正在寫備註的打卡：{ habit, date }
   const [notice, setNotice] = useState(migrated
     ? `已從舊版自動轉換：${migrated.habits} 個習慣、${migrated.checks} 筆打卡、${migrated.penaltyLogs} 筆懲罰${migrated.dropped ? `（${migrated.dropped} 筆找不到對應習慣的紀錄未轉入）` : ""}。舊資料仍保留在瀏覽器中當備份。`
     : null);
@@ -125,9 +127,21 @@ function App() {
     removePenaltyLog(id) { update((s) => ({ ...s, penaltyLogs: s.penaltyLogs.filter((l) => l.id !== id) })); },
     saveHabit(h) {
       update((s) => {
-        const exists = s.habits.some((x) => x.id === h.id);
-        return { ...s, habits: exists ? s.habits.map((x) => (x.id === h.id ? h : x)) : [...s.habits, h] };
+        const old = s.habits.find((x) => x.id === h.id);
+        // 改了頻率 → 週期從這週重新起算
+        if (old && (old.goalTimes !== h.goalTimes || old.goalWeeks !== h.goalWeeks)) h = { ...h, goalSince: weekStartOf(today, s.settings.weekStart) };
+        return { ...s, habits: old ? s.habits.map((x) => (x.id === h.id ? h : x)) : [...s.habits, h] };
       });
+    },
+    setCheckNote(habitId, date, note) {
+      const t = note.trim().slice(0, NOTE_MAX);
+      update((s) => ({
+        ...s, checks: s.checks.map((c) => {
+          if (c.habitId !== habitId || c.date !== date) return c;
+          const { note: _, ...rest } = c;
+          return t ? { ...rest, note: t } : rest;
+        }),
+      }));
     },
     deleteHabit(h) {
       const n = state.checks.filter((c) => c.habitId === h.id).length;
@@ -177,7 +191,7 @@ function App() {
     },
   };
 
-  const ctx = { state, idx, today, actions, activeHabits, openDay: setSheetDate, editHabit: setEditing };
+  const ctx = { state, idx, today, actions, activeHabits, openDay: setSheetDate, editHabit: setEditing, editNote: setNoteFor };
   const tabs = [
     ["today", "今天", I.today], ["calendar", "日曆", I.cal],
     ...(state.settings.rewardsEnabled ? [["rewards", "獎勵", I.gift]] : []), ["settings", "設定", I.gear],
@@ -207,6 +221,7 @@ function App() {
 
       {sheetDate && <DaySheet {...ctx} date={sheetDate} onClose={() => setSheetDate(null)} />}
       {editing && <HabitEditor {...ctx} habit={editing} onClose={() => setEditing(null)} />}
+      {noteFor && <NoteSheet {...ctx} habit={noteFor.habit} date={noteFor.date} onClose={() => setNoteFor(null)} />}
     </div>
   );
 }
@@ -214,7 +229,7 @@ function App() {
 // =====================================================================
 //  今天
 // =====================================================================
-function TodayView({ state, idx, today, actions, activeHabits, editHabit }) {
+function TodayView({ state, idx, today, actions, activeHabits, editHabit, editNote }) {
   const ws = state.settings.weekStart;
   const doneN = activeHabits.filter((h) => isDone(idx, h.id, today)).length;
   return (
@@ -231,18 +246,22 @@ function TodayView({ state, idx, today, actions, activeHabits, editHabit }) {
           {activeHabits.map((h) => {
             const done = isDone(idx, h.id, today);
             const st = habitStats(h, idx, today, ws);
+            const note = idx.byHabit.get(h.id)?.get(today)?.note;
+            // 打卡（不是取消）且這個習慣有開「打卡時寫備註」→ 跳出備註
+            const tap = () => { actions.toggleCheck(h.id, today); if (!done && h.askNote) editNote({ habit: h, date: today }); };
             return (
               <SwipeRow key={h.id} className={`habit ${done ? "done" : ""}`} onEdit={() => editHabit(h)} onDelete={() => actions.deleteHabit(h)}>
-                <button className="checkbtn" style={{ "--c": h.color }} onClick={() => actions.toggleCheck(h.id, today)} aria-pressed={done} aria-label={`${h.name}：${done ? "已完成，點一下取消" : "標記完成"}`}>
+                <button className="checkbtn" style={{ "--c": h.color }} onClick={tap} aria-pressed={done} aria-label={`${h.name}：${done ? "已完成，點一下取消" : "標記完成"}`}>
                   {done && I.check}
                 </button>
-                <div className="grow" onClick={() => actions.toggleCheck(h.id, today)}>
+                <div className="grow" onClick={tap}>
                   <div className="name">{h.name}</div>
                   <div className="meta">
                     {st.current > 0 && <span>🔥 連續 {st.current} 天</span>}
-                    {h.weeklyTarget < 7 && <span>本週 {st.thisWeek}/{h.weeklyTarget}</span>}
+                    {!isDaily(h) && <span>{periodWord(h)} {st.thisPeriod}/{h.goalTimes}</span>}
                     {state.settings.rewardsEnabled && <span>＋{previewPoints(h, idx, today)}{h.type === "streak" ? "（累計）" : ""}</span>}
                   </div>
+                  {done && note && <button className="note-line" onClick={(e) => { e.stopPropagation(); editNote({ habit: h, date: today }); }}>{note}</button>}
                 </div>
               </SwipeRow>
             );
@@ -435,8 +454,8 @@ function StatsCard({ state, idx, today, habit, editHabit }) {
         <div><b>{st.current}</b><span>目前連續</span></div>
         <div><b>{st.longest}</b><span>最長連續</span></div>
         <div><b>{pct(st.monthRate)}</b><span>本月 {st.doneThisMonth}/{st.daysSoFar} 天</span></div>
-        {habit.weeklyTarget < 7
-          ? <div><b>{st.thisWeek}/{habit.weeklyTarget}</b><span>本週（連續達標 {st.weekStreak} 週）</span></div>
+        {!isDaily(habit)
+          ? <div><b>{st.thisPeriod}/{habit.goalTimes}</b><span>{periodWord(habit)}・連續達標 {st.periodStreak} {habit.goalWeeks === 1 ? "週" : "期"}{habit.goalWeeks > 1 ? `・剩 ${st.periodLeft} 天` : ""}</span></div>
           : <div><b>{st.total}</b><span>累計天數</span></div>}
       </div>
     </section>
@@ -456,8 +475,10 @@ function WeekGrid({ state, idx, today, actions, habits, anchor }) {
         <span>次數</span>
       </div>
       {habits.map((h) => {
-        const n = days.filter((d) => isDone(idx, h.id, d)).length;
-        const met = n >= h.weeklyTarget;
+        // 次數算「這一週所在那一期」的累計（每週一期時就是本週）
+        const per = periodOf(h, start, ws);
+        const n = countInRange(idx, h.id, per.start, per.end);
+        const met = n >= h.goalTimes;
         return (
           <div className="wrow" key={h.id}>
             <span className="wname"><i className="dot" style={{ background: h.color }} />{h.name}</span>
@@ -471,7 +492,7 @@ function WeekGrid({ state, idx, today, actions, habits, anchor }) {
                 </button>
               );
             })}
-            <span className={`wcount ${met ? "met" : ""}`}>{n}/{h.weeklyTarget}</span>
+            <span className={`wcount ${met ? "met" : ""}`}>{isDaily(h) ? `${n}/7` : `${n}/${h.goalTimes}`}</span>
           </div>
         );
       })}
@@ -616,12 +637,19 @@ function DaySheet({ state, idx, today, actions, activeHabits, date, onClose }) {
             <ul className="list">
               {habits.map((h) => {
                 const done = isDone(idx, h.id, date);
+                const note = idx.byHabit.get(h.id)?.get(date)?.note || "";
                 return (
                   <li key={h.id} className={`habit ${done ? "done" : ""}`} onClick={() => actions.toggleCheck(h.id, date)}>
                     <span className="checkbtn" style={{ "--c": h.color }}>{done && I.check}</span>
                     <div className="grow">
                       <div className="name">{h.name}{h.archived ? "（封存）" : ""}</div>
                       {done && state.settings.rewardsEnabled && <div className="meta"><span>＋{checkPoints(h, idx, date)}</span></div>}
+                      {done && (
+                        <input key={note} className="inline note-input" placeholder="備註" defaultValue={note} maxLength={NOTE_MAX}
+                          onClick={(e) => e.stopPropagation()}
+                          onBlur={(e) => e.target.value.trim() !== note && actions.setCheckNote(h.id, date, e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && e.target.blur()} />
+                      )}
                     </div>
                   </li>
                 );
@@ -631,6 +659,27 @@ function DaySheet({ state, idx, today, actions, activeHabits, date, onClose }) {
             {state.settings.rewardsEnabled && state.penalties.length > 0 && <PenaltyPanel state={state} idx={idx} date={date} actions={actions} />}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// 打卡後寫備註（或修改已寫的備註）
+function NoteSheet({ idx, actions, habit, date, onClose }) {
+  const [text, setText] = useState(() => idx.byHabit.get(habit.id)?.get(date)?.note || "");
+  const save = () => { actions.setCheckNote(habit.id, date, text); onClose(); };
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`${habit.name} 備註`}>
+        <div className="row between">
+          <h2><i className="dot" style={{ background: habit.color }} />{habit.name}</h2>
+          <button className="icon" onClick={onClose} aria-label="關閉">{I.x}</button>
+        </div>
+        <textarea autoFocus rows={3} maxLength={NOTE_MAX} value={text} onChange={(e) => setText(e.target.value)} placeholder="寫點什麼…（可留白）" />
+        <div className="row between actions">
+          <button className="ghost small" onClick={onClose}>略過</button>
+          <button className="primary" onClick={save}>儲存</button>
+        </div>
       </div>
     </div>
   );
@@ -663,10 +712,23 @@ function HabitEditor({ state, today, actions, habit, onClose }) {
             {PALETTE.map((c) => <button key={c} className={`sw ${h.color === c ? "on" : ""}`} style={{ background: c }} onClick={() => set({ color: c })} aria-label={c} />)}
           </div>
         </div>
-        <label className="field">每週目標
-          <select value={h.weeklyTarget} onChange={(e) => set({ weeklyTarget: Number(e.target.value) })}>
-            {[7, 6, 5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n === 7 ? "每天" : `每週 ${n} 次`}</option>)}
-          </select>
+        <div className="field">頻率
+          <div className="row gap wrap">
+            <select value={isDaily(h) ? "daily" : "custom"} onChange={(e) => set(e.target.value === "daily" ? { goalTimes: 7, goalWeeks: 1 } : { goalTimes: 3, goalWeeks: 1 })}>
+              <option value="daily">每天</option>
+              <option value="custom">自訂</option>
+            </select>
+            {!isDaily(h) && (
+              <span className="row gap goal">
+                每<NumField value={h.goalWeeks} min={1} max={52} onChange={(w) => set({ goalWeeks: w, goalTimes: Math.min(h.goalTimes, w * 7) })} />週
+                <NumField value={h.goalTimes} min={1} max={h.goalWeeks * 7} onChange={(t) => set({ goalTimes: t })} />次
+              </span>
+            )}
+          </div>
+        </div>
+        <label className="row between field-switch">
+          <span>打卡時寫備註</span>
+          <input type="checkbox" className="switch" checked={!!h.askNote} onChange={(e) => set({ askNote: e.target.checked })} />
         </label>
         {state.settings.rewardsEnabled && (
           <div className="row gap">
@@ -707,10 +769,10 @@ function RewardsView({ state, idx, today, actions }) {
   );
 }
 
-function NumField({ value, onChange, min = 1 }) {
+function NumField({ value, onChange, min = 1, max = Infinity }) {
   const [v, setV] = useState(String(value));
   useEffect(() => setV(String(value)), [value]);
-  const commit = () => { const n = Math.max(min, Number(v) || min); setV(String(n)); if (n !== value) onChange(n); };
+  const commit = () => { const n = Math.min(max, Math.max(min, Number(v) || min)); setV(String(n)); if (n !== value) onChange(n); };
   return <input className="num" inputMode="numeric" value={v} onChange={(e) => setV(e.target.value.replace(/\D/g, ""))} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && e.target.blur()} />;
 }
 
@@ -824,7 +886,7 @@ function SettingsView({ state, today, actions, editHabit }) {
               <i className="dot big" style={{ background: h.color }} />
               <div className="grow">
                 <div className="name">{h.name}{h.archived && <span className="tag">封存</span>}</div>
-                <div className="meta"><span>{h.weeklyTarget === 7 ? "每天" : `每週 ${h.weeklyTarget} 次`}</span>{state.settings.rewardsEnabled && <span>{h.type === "streak" ? "累計" : "計次"} +{h.value}</span>}</div>
+                <div className="meta"><span>{goalLabel(h)}</span>{state.settings.rewardsEnabled && <span>{h.type === "streak" ? "累計" : "計次"} +{h.value}</span>}</div>
               </div>
               {I.edit}
             </li>

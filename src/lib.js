@@ -39,6 +39,7 @@ export const LS_KEY_PREV = "habit_hourglass_v2_before_import"; // 匯入前自�
 export const STREAK_CAP = 30;
 export const PALETTE = ["#5b7f6a", "#4e6a8a", "#b0764f", "#8a9a5b", "#8c7a96", "#c4a35a", "#6f9e98", "#b5574b"];
 export const PENALTY_COLOR = "#b28d8d";
+export const NOTE_MAX = 500; // 每筆打卡備註的字數上限
 
 // ---------- 預設資料 ----------
 export function defaultState(today = todayKey()) {
@@ -77,11 +78,36 @@ export function newHabit(partial = {}, usedCount = 0, today = todayKey()) {
     color: PALETTE[usedCount % PALETTE.length],
     type: "count", // count = 每次固定加分；streak = 連續天數加成
     value: 1,
-    weeklyTarget: 7, // 每週目標次數（1–7）
+    goalTimes: 7, // 目標：每 goalWeeks 週 goalTimes 次；7 次／1 週 = 每天
+    goalWeeks: 1,
+    goalSince: weekStartOf(today), // 週期從這週開始算（改目標時會重設）
+    askNote: false, // 打卡時跳出備註輸入
     archived: false,
     createdAt: today,
     ...partial,
   };
+}
+
+// ---------- 目標頻率（每 X 週 Y 次） ----------
+export const isDaily = (h) => h.goalWeeks === 1 && h.goalTimes >= 7;
+export const goalLabel = (h) => (isDaily(h) ? "每天" : h.goalWeeks === 1 ? `每週 ${h.goalTimes} 次` : `每 ${h.goalWeeks} 週 ${h.goalTimes} 次`);
+export const periodWord = (h) => (h.goalWeeks === 1 ? "本週" : "本期");
+
+// date 所在的那一期：{ start, end }，每期 goalWeeks 週，從 goalSince 那週往前後推
+export function periodOf(h, date, weekStart = 1) {
+  const len = h.goalWeeks * 7;
+  const anchor = weekStartOf(h.goalSince || h.createdAt, weekStart);
+  const k = Math.floor(diffDays(anchor, weekStartOf(date, weekStart)) / len);
+  const start = addDays(anchor, k * len);
+  return { start, end: addDays(start, len - 1) };
+}
+
+export function countInRange(idx, habitId, start, end) {
+  const m = idx.byHabit.get(habitId);
+  if (!m) return 0;
+  let n = 0;
+  for (const d of m.keys()) if (d >= start && d <= end) n++;
+  return n;
 }
 
 // ---------- 清理 / 驗證 ----------
@@ -89,19 +115,31 @@ const num = (v, fb) => (Number.isFinite(Number(v)) ? Number(v) : fb);
 const str = (v, fb = "") => (v === null || v === undefined ? fb : String(v));
 const clampInt = (v, lo, hi, fb) => Math.min(hi, Math.max(lo, Math.round(num(v, fb))));
 
+// 目標頻率：舊資料只有 weeklyTarget（每週 1–7 次）→ 視為每 1 週 N 次
+export function normalizeGoal(h) {
+  const goalWeeks = clampInt(h.goalWeeks, 1, 52, 1);
+  const goalTimes = clampInt(h.goalTimes ?? h.weeklyTarget, 1, goalWeeks * 7, 7);
+  return { goalTimes, goalWeeks };
+}
+
 export function normalizeState(s, today = todayKey()) {
   const out = defaultState(today);
   if (!s || typeof s !== "object") return out;
-  out.habits = (Array.isArray(s.habits) ? s.habits : []).filter((h) => h && h.id).map((h, i) => ({
-    id: str(h.id),
-    name: str(h.name, "未命名習慣"),
-    color: typeof h.color === "string" ? h.color : PALETTE[i % PALETTE.length],
-    type: h.type === "streak" ? "streak" : "count",
-    value: clampInt(h.value, 1, 9999, 1),
-    weeklyTarget: clampInt(h.weeklyTarget, 1, 7, 7),
-    archived: !!h.archived,
-    createdAt: isDateKey(h.createdAt) ? h.createdAt : today,
-  }));
+  out.habits = (Array.isArray(s.habits) ? s.habits : []).filter((h) => h && h.id).map((h, i) => {
+    const createdAt = isDateKey(h.createdAt) ? h.createdAt : today;
+    return {
+      id: str(h.id),
+      name: str(h.name, "未命名習慣"),
+      color: typeof h.color === "string" ? h.color : PALETTE[i % PALETTE.length],
+      type: h.type === "streak" ? "streak" : "count",
+      value: clampInt(h.value, 1, 9999, 1),
+      ...normalizeGoal(h),
+      goalSince: isDateKey(h.goalSince) ? h.goalSince : createdAt,
+      askNote: !!h.askNote,
+      archived: !!h.archived,
+      createdAt,
+    };
+  });
   const habitIds = new Set(out.habits.map((h) => h.id));
   const seen = new Set();
   out.checks = (Array.isArray(s.checks) ? s.checks : []).filter((c) => {
@@ -113,6 +151,8 @@ export function normalizeState(s, today = todayKey()) {
   }).map((c) => {
     const o = { id: str(c.id, uid()), habitId: c.habitId, date: c.date, ts: num(c.ts, 0) };
     if (Number.isFinite(c.points)) o.points = c.points; // 舊版遷移過來的分數，保留原值
+    const note = str(c.note, "").trim().slice(0, NOTE_MAX);
+    if (note) o.note = note;
     return o;
   });
   // 補登了建立日之前的日子 → 建立日往前移，否則本月達成率、連續達標週數會漏算
@@ -186,7 +226,7 @@ export function migrateV1(old, today = todayKey()) {
         id: h.id, name: h.name,
         color: !h.color || OLD_PALETTE.includes(h.color) ? PALETTE[s.habits.length % PALETTE.length] : h.color,
         type: h.type === "streak" ? "streak" : "count",
-        value: h.value, weeklyTarget: 7, archived: false,
+        value: h.value, goalTimes: 7, goalWeeks: 1, askNote: false, archived: false,
         createdAt: dates[0] && dates[0] < today ? dates[0] : today,
       });
     }
@@ -308,17 +348,20 @@ export function habitStats(habit, idx, today, weekStart = 1) {
   const from = habit.createdAt > mStart ? habit.createdAt : mStart;
   const daysSoFar = Math.max(0, diffDays(from, today) + 1);
   const doneThisMonth = dates.filter((d) => d >= from && d <= today).length;
-  // 本週次數 & 連續達標週數
-  const ws = weekStartOf(today, weekStart);
-  const weekCount = (start) => { let n = 0; for (let i = 0; i < 7; i++) if (m.has(addDays(start, i))) n++; return n; };
-  const thisWeek = weekCount(ws);
-  let weekStreak = thisWeek >= habit.weeklyTarget ? 1 : 0;
-  let w = addDays(ws, -7);
-  while (w >= weekStartOf(habit.createdAt, weekStart) && weekCount(w) >= habit.weeklyTarget) { weekStreak++; w = addDays(w, -7); }
+  // 本期次數 & 連續達標期數（每期 = goalWeeks 週）
+  const cur = periodOf(habit, today, weekStart);
+  const thisPeriod = countInRange(idx, habit.id, cur.start, cur.end);
+  const periodLeft = diffDays(today, cur.end); // 本期還剩幾天（不含今天）
+  let periodStreak = thisPeriod >= habit.goalTimes ? 1 : 0;
+  let p = periodOf(habit, addDays(cur.start, -1), weekStart);
+  while (p.end >= habit.createdAt && countInRange(idx, habit.id, p.start, p.end) >= habit.goalTimes) {
+    periodStreak++;
+    p = periodOf(habit, addDays(p.start, -1), weekStart);
+  }
   return {
     current, longest, total: dates.length,
     monthRate: daysSoFar ? doneThisMonth / daysSoFar : 0, doneThisMonth, daysSoFar,
-    thisWeek, weekStreak,
+    thisPeriod, periodStreak, periodLeft,
   };
 }
 

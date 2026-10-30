@@ -1,6 +1,6 @@
 // Habit Hourglass service worker
 // CACHE_NAME 由 build.mjs 依檔案內容自動更新；內容一變就換新快取，舊快取會被清掉
-const CACHE_NAME = "habit-hourglass-afc80528d1";
+const CACHE_NAME = "habit-hourglass-051ea57ff0";
 const ASSETS = [
   "./",
   "./index.html",

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import {
   addDays, diffDays, weekStartOf, migrateV1, normalizeState, buildIndex, checkPoints, previewPoints,
-  habitStats, rewardTotals, parseImport, loadState, reminderDue, skyAt, LS_KEY, LS_KEY_V1,
+  habitStats, rewardTotals, parseImport, loadState, reminderDue, skyAt, periodOf, goalLabel, LS_KEY, LS_KEY_V1,
 } from "../src/lib.js";
 
 let passed = 0;
@@ -77,7 +77,7 @@ test("統計：目前連續（今天還沒打不算斷）、最長連續、本�
   const st = habitStats(s.habits[0], buildIndex(s), TODAY, 1);
   assert.equal(st.current, 2);
   assert.equal(st.longest, 4);
-  assert.equal(st.thisWeek, 2);
+  assert.equal(st.thisPeriod, 2);
   assert.equal(st.doneThisMonth, 6);
   assert.equal(st.daysSoFar, 22);
 });
@@ -157,6 +157,48 @@ test("背景天色：時段切換、正午太陽在最高、午夜月亮在最�
   assert.deepEqual([at(0).body, at(0).x, at(0).y], ["moon", 50, 46]);
   assert.equal(at(6).y, 72); // 剛升起，還在山後
   assert.equal(at(18).body, "moon");
+});
+
+test("頻率：舊版每週 N 次自動轉成 goalTimes/goalWeeks，次數上限受週數限制", () => {
+  const s = normalizeState({ version: 2, habits: [
+    { id: "a", name: "a", weeklyTarget: 3, createdAt: "2026-10-01" },
+    { id: "b", name: "b", createdAt: "2026-10-01" },
+    { id: "c", name: "c", goalWeeks: 4, goalTimes: 99, createdAt: "2026-10-01" },
+  ] }, TODAY);
+  assert.deepEqual(s.habits.map((h) => [h.goalTimes, h.goalWeeks]), [[3, 1], [7, 1], [28, 4]]);
+  assert.deepEqual(s.habits.map(goalLabel), ["每週 3 次", "每天", "每 4 週 28 次"]);
+  assert.equal(s.habits[0].goalSince, "2026-10-01");
+});
+
+test("每 4 週 1 次：期別從 goalSince 那週算起，連續達標期數往回數", () => {
+  // goalSince 2026-09-01（週二）→ 錨點週一 08-31；每期 28 天：08-31〜09-27、09-28〜10-25
+  const s = normalizeState({
+    version: 2,
+    habits: [{ id: "a", name: "回老家", goalWeeks: 4, goalTimes: 1, goalSince: "2026-09-01", createdAt: "2026-09-01" }],
+    checks: [{ id: "1", habitId: "a", date: "2026-09-10", ts: 1 }, { id: "2", habitId: "a", date: "2026-10-05", ts: 2 }],
+  }, TODAY);
+  const h = s.habits[0];
+  assert.deepEqual(periodOf(h, TODAY, 1), { start: "2026-09-28", end: "2026-10-25" });
+  assert.deepEqual(periodOf(h, "2026-08-31", 1), { start: "2026-08-31", end: "2026-09-27" });
+  const st = habitStats(h, buildIndex(s), TODAY, 1);
+  assert.equal(st.thisPeriod, 1);
+  assert.equal(st.periodStreak, 2);
+  assert.equal(st.periodLeft, 3);
+});
+
+test("打卡備註：保留、去空白、空字串不存、過長截斷", () => {
+  const s = normalizeState({
+    version: 2, habits: [{ id: "a", name: "x", askNote: true }],
+    checks: [
+      { id: "1", habitId: "a", date: "2026-10-20", ts: 1, note: "  跑了 5 公里  " },
+      { id: "2", habitId: "a", date: "2026-10-21", ts: 2, note: "   " },
+      { id: "3", habitId: "a", date: "2026-10-22", ts: 3, note: "字".repeat(600) },
+    ],
+  }, TODAY);
+  assert.equal(s.habits[0].askNote, true);
+  assert.equal(s.checks[0].note, "跑了 5 公里");
+  assert.ok(!("note" in s.checks[1]));
+  assert.equal(s.checks[2].note.length, 500);
 });
 
 console.log(`\n全部 ${passed} 項通過`);

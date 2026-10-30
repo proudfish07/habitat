@@ -161,6 +161,15 @@ h3 { font-family: var(--serif); font-weight: 600; font-size: 14px; letter-spacin
 .swipe.edit.armed .swipe-bg { background: var(--accent); color: var(--accent-ink); }
 .swipe.del.armed .swipe-bg { background: var(--danger); color: #fff; }
 
+/* 打卡備註 */
+.note-line { display: block; max-width: 100%; margin-top: 2px; font-size: 12px; color: var(--muted); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--serif); }
+.note-line::before { content: "— "; opacity: .6; }
+input.note-input { display: block; width: 100%; margin-top: 4px; font-size: 13px; padding: 4px 8px; }
+textarea { font: inherit; color: var(--ink); background: var(--card-solid); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; resize: vertical; min-height: 84px; width: 100%; }
+textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+.goal { color: var(--ink); font-size: 15px; }
+.field-switch { font-size: 13px; color: var(--muted); }
+
 .tag { font-size: 11px; background: var(--soft); border-radius: 999px; padding: 1px 8px; margin-left: 6px; font-weight: 400; }
 
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
